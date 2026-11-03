@@ -46,6 +46,8 @@ def integration_upgrade(
     from .. import _require_specify_project, _install_shared_infra_or_exit, _install_shared_infra
 
     project_root = _require_specify_project()
+    from .._file_policy import project_files
+    files = project_files(project_root)
     current = _read_integration_json(project_root)
     installed_key = _default_integration_key(current)
     installed_keys = _installed_integration_keys(current)
@@ -210,6 +212,7 @@ def integration_upgrade(
     _install_shared_infra_or_exit(
         project_root,
         selected_script,
+        files=files,
         force=force,
         invoke_separator=_invoke_separator_for_integration(
             infra_integration, current, infra_key, infra_parsed,
@@ -221,7 +224,7 @@ def integration_upgrade(
     )
     if os.name != "nt":
         from .. import ensure_executable_scripts
-        ensure_executable_scripts(project_root)
+        ensure_executable_scripts(project_root, files=files)
 
     # Phase 1: Install new files (overwrites existing; old-only files remain)
     console.print(f"Upgrading integration: [cyan]{key}[/cyan]")
@@ -258,6 +261,7 @@ def integration_upgrade(
                 _install_shared_infra(
                     project_root,
                     selected_script,
+                    files=files,
                     invoke_separator=_invoke_separator_for_integration(
                         integration, {"integration_settings": settings}, key, parsed_options,
                         project_root=project_root,
@@ -274,7 +278,7 @@ def integration_upgrade(
                 ) from exc
             if os.name != "nt":
                 from .. import ensure_executable_scripts
-                ensure_executable_scripts(project_root)
+                ensure_executable_scripts(project_root, files=files)
         new_manifest.save()
         _write_integration_json(project_root, installed_key, installed_keys, settings)
         if installed_key == key:
