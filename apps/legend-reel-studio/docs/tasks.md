@@ -61,6 +61,10 @@
 - [x] T041 Fallback khi máy chủ không có Internet: trình duyệt gọi API Wikipedia/Commons, tải bytes, gửi `data_url` (backend giải mã base64, giữ license/attribution)
 - [x] T042 UI: thanh tiến trình “Đang tải i/n”, nhãn “trình duyệt tải hộ”, nút `.zip` nổi bật + test jsdom mock Wikipedia → zip JPEG thật
 
+- [x] T043 `GET /api/projects/{id}/bundle.zip` + nút “Tải về máy” (bài báo, JSON, ảnh, voice, `HUONG-DAN.txt`)
+- [x] T044 Nút “Kiểm tra mạng” + `POST/GET /api/client-log` để chẩn đoán lỗi mạng phía trình duyệt
+- [x] T045 `pytest` 58 test, jsdom 50 check
+
 ## Backlog (chưa làm)
 
 - [ ] T034 Đăng trực tiếp qua Facebook Graph API (cần quyền Page)

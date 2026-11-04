@@ -576,6 +576,7 @@
           <select class="select" id="status-select" style="max-width:180px">
             ${STATUS_ORDER.map((s) => `<option value="${s}" ${p.status === s ? "selected" : ""}>${STATUS_LABEL[s]}</option>`).join("")}
           </select>
+          <a class="btn btn-ghost btn-sm" id="btn-bundle" href="/api/projects/${esc(p.id)}/bundle.zip" download title="Tải bài báo + ảnh + voice về máy">${ICON.zip} Tải về máy</a>
           <button class="btn btn-ghost btn-sm" id="btn-export">${ICON.download} Xuất .md</button>
           <button class="btn btn-ghost btn-sm" id="btn-dup">${ICON.copy} Nhân bản</button>
           <button class="btn btn-danger btn-sm" id="btn-del" title="Xoá dự án">${ICON.trash}</button>
@@ -867,9 +868,10 @@
           <div class="spacer"></div>
           <button class="btn btn-sm btn-primary" id="btn-auto">${ICON.spark} Tự động lấy ${Math.max(1, target - imgs.length)} ảnh</button>
           <button class="btn btn-sm" id="btn-suggest">${ICON.image} Chọn thủ công</button>
+          <button class="btn btn-sm btn-ghost" id="btn-diag" title="Kiểm tra trình duyệt có gọi được Wikipedia/Commons không">${ICON.refresh} Kiểm tra mạng</button>
           <button class="btn btn-sm" id="btn-upload-images">${ICON.plus} Tải ảnh lên</button>
           <input type="file" id="img-files" accept="image/*" multiple hidden />
-          <a class="btn btn-sm ${canZip ? "" : "is-disabled"} ${zipHot ? "is-hot" : ""}" ${canZip ? `href="/api/projects/${esc(p.id)}/images.zip"` : ""} id="btn-zip">${ICON.zip} Tải tất cả (.zip)</a>
+          <a class="btn btn-sm ${canZip ? "" : "is-disabled"} ${zipHot ? "is-hot" : ""}" ${canZip ? `href="/api/projects/${esc(p.id)}/images.zip"` : ""} id="btn-zip">${ICON.zip} Tải về máy (.zip)</a>
         </div>
         <div class="panel-body">
           <div id="img-status" class="img-status" hidden></div>
@@ -941,6 +943,43 @@
     el.hidden = false;
     el.className = `img-status ${kind}`;
     el.innerHTML = `${kind === "busy" ? '<span class="spin"></span>' : ""}${esc(text)}`;
+  }
+
+  /** The browser tells the sandbox server what it could not reach (see /api/client-log). */
+  async function reportClient(event, message, detail = "") {
+    try {
+      await fetch("/api/client-log", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ event, message, detail }),
+      });
+    } catch (err) {
+      /* diagnostics must never break the UI */
+    }
+  }
+
+  async function diagnoseNetwork() {
+    const checks = [
+      ["Wikipedia API", "https://en.wikipedia.org/api/rest_v1/page/summary/Elvis_Presley"],
+      ["Commons API", "https://commons.wikimedia.org/w/api.php?action=query&format=json&origin=*&meta=siteinfo&siprop=general"],
+      ["Commons ảnh", "https://upload.wikimedia.org/wikipedia/commons/thumb/a/a9/Example.jpg/240px-Example.jpg"],
+    ];
+    const lines = [];
+    for (const [label, url] of checks) {
+      const started = Date.now();
+      try {
+        const res = await fetch(url, { mode: "cors" });
+        await res.text();
+        lines.push(`${label}: ${res.ok ? "OK" : `HTTP ${res.status}`} · ${Date.now() - started} ms`);
+      } catch (err) {
+        lines.push(`${label}: LỖI — ${err.message}`);
+      }
+    }
+    const summary = lines.join(" | ");
+    setImgStatus(`Trình duyệt: ${summary}`, "warn");
+    await reportClient("network-test", summary, location.hostname);
+    toast("Đã kiểm tra — xem dòng trạng thái phía trên", "ok");
+    return summary;
   }
 
   async function wikipediaCandidatesInBrowser(artist) {
@@ -1054,7 +1093,14 @@
       state.browserOnly = false;
       return data;
     } catch (err) {
-      const local = await browserSuggest(p.artist || {}, limit);
+      let local;
+      try {
+        local = await browserSuggest(p.artist || {}, limit);
+      } catch (fallbackErr) {
+        await reportClient("browser-fallback-failed", `${err.message} → ${fallbackErr.message}`, navigator.userAgent);
+        throw fallbackErr;
+      }
+      await reportClient("server-offline-browser-ok", err.message, `${(local.images || []).length} ảnh qua trình duyệt`);
       state.browserOnly = true;
       local.errors = [`Máy chủ chưa gọi được Wikipedia (${err.message}) → trình duyệt tự tải ảnh hộ.`, ...(local.errors || [])];
       return local;
@@ -1244,6 +1290,7 @@
       bindSuggestions();
       setImgStatus(data.browser_fallback ? "Máy chủ không có Internet — trình duyệt sẽ tải ảnh khi bạn bấm Thêm." : "", data.browser_fallback ? "warn" : "");
     } catch (err) {
+      await reportClient("suggest-failed", err.message, navigator.userAgent);
       state.suggest = null;
       panel.innerHTML = `<div class="warn-line bad">! ${esc(err.message)}</div>
         <div class="banner-tip">Không lấy được ảnh tự động (mạng bị chặn?). Bạn vẫn có thể dán link ảnh hoặc tải ảnh lên.</div>`;
@@ -1303,6 +1350,7 @@
 
     const zip = $("#btn-zip");
     if (zip) zip.addEventListener("click", () => { state.zipHint = false; });
+    $("#btn-diag").onclick = () => diagnoseNetwork();
     $("#btn-auto").onclick = () => autoFetchImages();
     $("#btn-suggest").onclick = () => suggestManually();
 

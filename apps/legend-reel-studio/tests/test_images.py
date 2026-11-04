@@ -1,4 +1,5 @@
 import io
+import json
 import zipfile
 
 import pytest
@@ -266,3 +267,33 @@ def test_decode_data_url_rejects_oversized_payload():
     huge = "data:image/jpeg;base64," + "A" * (images_mod.MAX_BYTES * 2)
     with pytest.raises(images_mod.ImageFetchError):
         images_mod.decode_data_url(huge)
+
+
+def test_bundle_zip_has_article_images_and_attribution(project, fake_network):
+    data = client.get(f"/api/projects/{project['id']}/images/suggest").json()
+    client.post(f"/api/projects/{project['id']}/images", json={"images": data["images"][:2]})
+    res = client.get(f"/api/projects/{project['id']}/bundle.zip")
+    assert res.status_code == 200
+    assert res.headers["content-type"] == "application/zip"
+    assert "attachment" in res.headers["content-disposition"]
+    assert res.headers["content-disposition"].endswith('-bundle.zip"')
+    with zipfile.ZipFile(io.BytesIO(res.content)) as archive:
+        names = set(archive.namelist())
+        assert "article.md" in names
+        assert "project.json" in names
+        assert "HUONG-DAN.txt" in names
+        assert "images/ATTRIBUTION.txt" in names
+        assert len([n for n in names if n.startswith("images/") and n.endswith(".jpg")]) == 2
+        readme = archive.read("HUONG-DAN.txt").decode("utf-8")
+        assert "images/" in readme and "ATTRIBUTION.txt" in readme
+        article = archive.read("article.md").decode("utf-8")
+        assert len(article.split()) > 500
+        payload = json.loads(archive.read("project.json").decode("utf-8"))
+        assert payload["id"] == project["id"]
+
+
+def test_client_log_records_browser_problems():
+    res = client.post("/api/client-log", json={"event": "network-test", "message": "Wikipedia API: LỖI — Failed to fetch", "detail": "preview"})
+    assert res.status_code == 200
+    entries = client.get("/api/client-log?limit=20").json()["entries"]
+    assert any(e["event"] == "network-test" and "Failed to fetch" in e["message"] for e in entries)

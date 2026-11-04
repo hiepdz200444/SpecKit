@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import json
 import os
 import re
 import shutil
@@ -618,6 +619,37 @@ def export_project(pid: str, fmt: str = "md"):
     return PlainTextResponse(payload["article_markdown"])
 
 
+@app.get("/api/projects/{pid}/bundle.zip")
+def download_bundle(pid: str):
+    """Everything about one project in a single file the user can save locally."""
+    project = get_or_404(pid)
+    artist = library.get_artist(project["artist_id"]) or {}
+    event = project.get("event") or {}
+    slug = re.sub(r"[^a-z0-9]+", "-", (artist.get("id") or "artist").lower()).strip("-")
+    package = content.build_package(project, artist, event)
+    images = project.get("images") or []
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("article.md", package.get("article_markdown", ""))
+        archive.writestr("project.json", json.dumps(serialize_project(project), ensure_ascii=False, indent=2))
+        archive.writestr(
+            "HUONG-DAN.txt",
+            images_mod.bundle_readme({**project, "status_label": STATUS_LABELS.get(project.get("status"), project.get("status", ""))}, artist, len(images)),
+        )
+        for index, image in enumerate(images, 1):
+            path = os.path.join(DATA_DIR, image.get("file", ""))
+            if image.get("file") and os.path.exists(path):
+                archive.write(path, arcname=f"images/{index:02d}.jpg")
+        archive.writestr("images/ATTRIBUTION.txt", images_mod.attribution_text(images, artist.get("name", "")))
+        voice = project.get("voice") or {}
+        voice_path = os.path.join(DATA_DIR, voice.get("file", "")) if voice.get("file") else ""
+        if voice_path and os.path.exists(voice_path):
+            archive.write(voice_path, arcname=f"voice/{slug}.{voice.get('ext') or 'mp3'}")
+    buffer.seek(0)
+    headers = {"Content-Disposition": f'attachment; filename="{slug}-bundle.zip"'}
+    return Response(buffer.getvalue(), media_type="application/zip", headers=headers)
+
+
 @app.get("/api/projects/{pid}/cover")
 def cover(pid: str):
     project = serialize_project(get_or_404(pid))
@@ -626,6 +658,45 @@ def cover(pid: str):
     if not os.path.exists(path):
         raise HTTPException(404, "Chưa có ảnh bìa")
     return FileResponse(path)
+
+
+# --------------------------------------------------------------------------- #
+# client diagnostics                                                          #
+# --------------------------------------------------------------------------- #
+CLIENT_LOG = os.path.join(DATA_DIR, "client.log")
+
+
+@app.post("/api/client-log")
+def client_log(payload: dict = Body(default={})):
+    """The browser posts what it could not reach; we keep it for troubleshooting."""
+    entry = {
+        "at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "event": str(payload.get("event", ""))[:120],
+        "message": str(payload.get("message", ""))[:2000],
+        "detail": str(payload.get("detail", ""))[:4000],
+    }
+    try:
+        with open(CLIENT_LOG, "a", encoding="utf-8") as handle:
+            handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    except OSError:
+        pass
+    print(f"[client] {entry['event']}: {entry['message'][:300]}", flush=True)
+    return {"ok": True}
+
+
+@app.get("/api/client-log")
+def read_client_log(limit: int = Query(default=50, ge=1, le=500)):
+    if not os.path.exists(CLIENT_LOG):
+        return {"entries": []}
+    with open(CLIENT_LOG, encoding="utf-8") as handle:
+        lines = handle.read().splitlines()[-limit:]
+    entries = []
+    for line in lines:
+        try:
+            entries.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+    return {"entries": entries}
 
 
 # --------------------------------------------------------------------------- #

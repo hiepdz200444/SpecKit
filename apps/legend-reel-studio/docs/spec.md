@@ -138,6 +138,8 @@ Người dùng xem toàn bộ dự án, lọc theo trạng thái, tìm kiếm, m
 - **FR-017**: Hệ thống PHẢI chạy offline (trừ hai tính năng cần mạng: lấy ảnh và edge-tts), không phụ thuộc LLM hay API trả phí.
 - **FR-018**: Giao diện PHẢI là tiếng Việt, nội dung xuất bản là tiếng Anh (thị trường Mỹ).
 - **FR-019**: Nút “Tự động lấy 20 ảnh” PHẢI lấy và lưu ảnh trong một lần bấm (`POST /images/auto`); khi máy chủ không có Internet, studio PHẢI tự chuyển sang tải ảnh bằng trình duyệt và upload qua `data_url`, kèm tiến trình “Đang tải i/n”.
+- **FR-021**: Studio PHẢI có nút “Tải về máy” xuất một `.zip` gồm `article.md`, `project.json`, ảnh JPEG + `ATTRIBUTION.txt`, voice và `HUONG-DAN.txt`.
+- **FR-022**: UI PHẢI có công cụ “Kiểm tra mạng” gọi thử Wikipedia/Commons từ trình duyệt và gửi kết quả về `POST /api/client-log` để chẩn đoán khi máy chủ bị chặn mạng.
 - **FR-020**: Sau khi lấy ảnh, người dùng PHẢI tải được ảnh về máy: từng ảnh qua nút “Tải về”, cả bộ qua `images.zip` (JPEG + `ATTRIBUTION.txt`).
 
 ### Key Entities

@@ -391,6 +391,41 @@ def import_upload(data_dir: str, project_id: str, raw: bytes, filename: str) -> 
     return save_image(data_dir, project_id, raw, record)
 
 
+def bundle_readme(project: dict, artist: dict, image_count: int = 0) -> str:
+    """Short Vietnamese note that ships inside the full download bundle."""
+    event = project.get("event") or {}
+    voice = project.get("voice") or {}
+    lines = [
+        f"LEGENDS REEL STUDIO — {artist.get('name', '')}",
+        "=" * 46,
+        "",
+        "Trong file .zip này:",
+        "  article.md                bài báo tiếng Anh + hook + caption + hashtag + comment pin",
+        "  project.json              toàn bộ dữ liệu dự án (sao lưu / nhập lại)",
+        f"  images/                   {image_count} ảnh JPEG đã chuẩn hoá",
+        "  images/ATTRIBUTION.txt    giấy phép, tác giả, link gốc của từng ảnh",
+        "  voice/                    file voiceover (nếu bạn đã tạo trong studio)",
+        "",
+        "THÔNG TIN DỰ ÁN",
+        f"  Nghệ sĩ     : {artist.get('name', '')}",
+        f"  Sự kiện     : {event.get('label_vi') or event.get('title') or ''}",
+        f"  Ngày        : {event.get('date', '')}",
+        f"  Tiêu đề bài : {project.get('article_title', '')}",
+        f"  Trạng thái  : {project.get('status_label') or project.get('status', '')}",
+        f"  Voiceover   : {'có — ' + str(voice.get('file', '')) if voice.get('file') else 'chưa tạo'}",
+        "",
+        "CÁCH DÙNG",
+        "  1. Mở article.md để copy tiêu đề, bài báo, hook, caption và hashtag.",
+        "  2. Ảnh trong images/ dùng làm banner (ảnh 01) và ảnh trong bài.",
+        "  3. Đối chiếu images/ATTRIBUTION.txt trước khi đăng: ảnh Wikimedia/Commons",
+        "     vẫn cần kiểm tra giấy phép cho mục đích thương mại.",
+        "",
+        "Ghi chú: studio chỉ soạn nội dung và nguyên liệu; việc dựng video làm ở CapCut/Canva.",
+        "",
+    ]
+    return "\n".join(lines)
+
+
 def attribution_text(images: list[dict], artist_name: str = "") -> str:
     lines = [
         f"Image credits — {artist_name}".strip(" —"),

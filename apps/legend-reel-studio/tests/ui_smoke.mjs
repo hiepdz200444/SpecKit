@@ -232,6 +232,8 @@ async function main() {
     ok(tabs.some((t) => t.includes("Ảnh nghệ sĩ")), "tab Ảnh nghệ sĩ present");
     ok(tabs.some((t) => t.includes("Text & Voice")), "tab Text & Voice present");
     ok(!tabs.some((t) => /video|mp4/i.test(t)), "no Video/MP4 tab");
+    const bundleHref = ($("#btn-bundle") || {}).getAttribute ? $("#btn-bundle").getAttribute("href") : "";
+    ok((bundleHref || "").endsWith("bundle.zip"), "nút “Tải về máy” trỏ tới gói tải đầy đủ");
 
     console.log("• Tab Bài báo");
     await waitFor(() => $("#f-title") && $("#f-body"), "article tab");
@@ -306,6 +308,13 @@ async function main() {
     await waitFor(() => $$("#suggest-panel [data-cand]").length > 0, "suggestion candidates render", 40000);
     ok($$("#suggest-panel [data-cand]").length >= 3, "panel “Chọn thủ công” liệt kê ảnh gợi ý");
     ok(/trình duyệt tải hộ/.test($("#suggest-panel").textContent), "panel ghi rõ đang tải bằng trình duyệt");
+
+    console.log("• Kiểm tra mạng trình duyệt");
+    click("#btn-diag");
+    await waitFor(() => /Trình duyệt:/.test($("#img-status").textContent), "network self-test output", 20000);
+    ok(/Wikipedia API: OK/.test($("#img-status").textContent), "self-test báo được trạng thái Wikipedia từ trình duyệt");
+    const logs = await nodeFetch(`${base}/api/client-log?limit=10`).then((r) => r.json());
+    ok((logs.entries || []).some((e) => e.event === "network-test"), "kết quả kiểm tra được gửi về máy chủ để chẩn đoán");
 
     console.log("• Tab Text & Voice");
     click('[data-tab="script"]');
