@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Legends Reel Studio — Reels nhạc cho thị trường Mỹ</title>
+<meta name="description" content="Tìm sự kiện của các huyền thoại âm nhạc, viết bài báo, render reel MP4 và tạo caption kéo người xem xuống comment." />
+<link rel="stylesheet" href="/styles.css" />
+<link rel="preload" href="/assets/fonts/Anton-Regular.ttf" as="font" type="font/ttf" crossorigin />
+<style>
+  @font-face { font-family: "Anton"; src: url("/assets/fonts/Anton-Regular.ttf") format("truetype"); font-weight: 400; font-display: swap; }
+  @font-face { font-family: "Barlow"; src: url("/assets/fonts/Barlow-Regular.ttf") format("truetype"); font-weight: 400; font-display: swap; }
+  @font-face { font-family: "Barlow"; src: url("/assets/fonts/Barlow-SemiBold.ttf") format("truetype"); font-weight: 600; font-display: swap; }
+  @font-face { font-family: "Barlow"; src: url("/assets/fonts/Barlow-Bold.ttf") format("truetype"); font-weight: 700; font-display: swap; }
+  @font-face { font-family: "DM Serif Display"; src: url("/assets/fonts/DMSerifDisplay-Regular.ttf") format("truetype"); font-weight: 400; font-style: normal; font-display: swap; }
+  @font-face { font-family: "DM Serif Display"; src: url("/assets/fonts/DMSerifDisplay-Italic.ttf") format("truetype"); font-weight: 400; font-style: italic; font-display: swap; }
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-mark">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#1a1206" stroke-width="1.7" stroke-linecap="round">
+          <circle cx="12" cy="12" r="9"></circle><circle cx="12" cy="12" r="2.6"></circle>
+          <path d="M12 3a9 9 0 0 1 9 9"></path>
+        </svg>
+      </div>
+      <div>
+        <div class="brand-name">LEGENDS</div>
+        <div class="brand-sub">Reel Studio</div>
+      </div>
+    </div>
+
+    <nav class="nav">
+      <div class="nav-label">Không gian làm việc</div>
+      <button class="nav-item" data-nav="dashboard">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3" y="3" width="7" height="9" rx="2"/><rect x="14" y="3" width="7" height="5" rx="2"/><rect x="14" y="12" width="7" height="9" rx="2"/><rect x="3" y="16" width="7" height="5" rx="2"/></svg>
+        Tổng quan
+      </button>
+      <button class="nav-item" data-nav="discover">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.2-3.2"/></svg>
+        Khám phá sự kiện
+        <span class="nav-badge" id="nav-event-count">—</span>
+      </button>
+      <button class="nav-item" data-nav="projects">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 6h16v12H4z"/><path d="M4 10h16"/><path d="M9 14h6"/></svg>
+        Dự án reels
+        <span class="nav-badge" id="nav-project-count">0</span>
+      </button>
+      <div class="nav-label">Quy trình</div>
+      <button class="nav-item" data-nav="howto">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 3v18"/><path d="M3 8h18"/><path d="M5 16h14"/></svg>
+        Cách hoạt động
+      </button>
+    </nav>
+
+    <div class="side-card" id="side-today">
+      <h4>Sự kiện hôm nay</h4>
+      <div class="side-date" id="side-date">—</div>
+      <p id="side-events">Đang tải lịch sử âm nhạc…</p>
+    </div>
+  </aside>
+
+  <div class="main">
+    <header class="topbar">
+      <div class="crumb" id="crumb"><strong>Tổng quan</strong></div>
+      <div class="topbar-actions">
+        <span class="pill-date">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3" y="5" width="18" height="16" rx="3"/><path d="M8 3v4M16 3v4M3 11h18"/></svg>
+          <span id="today-label">—</span>
+        </span>
+        <button class="btn btn-primary" id="btn-new">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+          Tạo reels mới
+        </button>
+      </div>
+    </header>
+
+    <main class="view" id="view">
+      <div class="skeleton" style="height:180px;margin-bottom:20px"></div>
+      <div class="skeleton" style="height:120px"></div>
+    </main>
+  </div>
+</div>
+
+<div class="toasts" id="toasts"></div>
+<div id="modal-root"></div>
+<script src="/app.js"></script>
+</body>
+</html>
