@@ -19,28 +19,42 @@ Một sự kiện (sinh nhật, ngày mất, kỷ niệm phát hành) → **bài
 
 Giữ nguyên từ bản cũ: **tìm sự kiện theo ngày**, **thư viện nghệ sĩ**, **quản lý dự án** (trạng thái, nhân bản, xoá) và **xuất markdown**.
 
-## 2. Chạy thử
+## 2. Chạy trên máy của bạn
 
-**Cần trước:** Python 3.11+ và Git (Windows: `winget install --id Git.Git -e --source winget` và `winget install --id Python.Python.3.12 -e --source winget`, sau đó mở lại Terminal).
-
-### Windows — PowerShell (khuyến nghị)
+**Cần trước:** Python 3.11+ (bắt buộc), Git (chỉ cần nếu bạn clone). Windows cài nhanh:
 
 ```powershell
-git clone -b arena/19d0d9ca-speckit https://github.com/hiepdz200444/SpecKit.git
+winget install --id Python.Python.3.12 -e --source winget
+winget install --id Git.Git -e --source winget
+```
+
+Cài xong **mở lại** Terminal/PowerShell để nhận `python`. Khi cài từ python.org nhớ tick **“Add python.exe to PATH”**.
+
+### Windows — nháy đúp `run.bat` (dễ nhất)
+
+1. Tải code: `git clone https://github.com/hiepdz200444/SpecKit.git` **hoặc** vào GitHub → **Code → Download ZIP** → giải nén.
+2. Mở thư mục `SpecKit\apps\legend-reel-studio`.
+3. Nháy đúp **`run.bat`**. Lần đầu script tự tạo `.venv` và cài thư viện (1–2 phút), sau đó in ra `http://localhost:8000`.
+4. Mở trình duyệt tới **`http://localhost:8000`**. Nếu Windows hỏi *Firewall* → chọn **Allow** (chỉ cần khi bạn muốn máy khác trong LAN truy cập).
+
+Dùng PowerShell thay cho `.bat`:
+
+```powershell
 cd SpecKit\apps\legend-reel-studio
 .\run.ps1
 ```
 
 Nếu PowerShell chặn script: `powershell -ExecutionPolicy Bypass -File .\run.ps1`.
-Hoặc đơn giản nhất: **nháy đúp `run.bat`** trong thư mục `apps\legend-reel-studio`.
 
 ### macOS / Linux
 
 ```bash
 git clone -b arena/19d0d9ca-speckit https://github.com/hiepdz200444/SpecKit.git
 cd SpecKit/apps/legend-reel-studio
-./run.sh                 # tạo .venv, cài deps, chạy http://localhost:8000
+./run.sh          # nếu báo Permission denied: chmod +x run.sh  rồi chạy lại
 ```
+
+`run.sh` kiểm tra Python ≥ 3.11, tạo `.venv`, cài `requirements.txt` và mở **`http://localhost:8000`**.
 
 ### Thủ công (mọi hệ điều hành)
 
@@ -51,7 +65,42 @@ pip install -r requirements.txt
 uvicorn app:app --app-dir backend --host 127.0.0.1 --port 8000
 ```
 
-Mở `http://localhost:8000`. Dữ liệu nằm trong `data/` (`studio.db`, `images/`, `voice/`) và không được commit. Đổi cổng: `PORT=8081 ./run.sh` (PowerShell: `$env:PORT=8081; .\run.ps1`).
+### Đổi cổng / cho máy khác truy cập
+
+```bash
+PORT=8081 ./run.sh                 # macOS/Linux
+```
+
+```powershell
+$env:PORT=8081; .\run.ps1          # Windows PowerShell
+```
+
+Muốn máy khác trong LAN vào được (điện thoại, máy tính bảng): `HOST=0.0.0.0 PORT=8000 ./run.sh`, rồi mở `http://<IP-máy-bạn>:8000` và cho phép qua firewall.
+
+### Dữ liệu, sao lưu, cập nhật
+
+- Toàn bộ dự án, ảnh, voice nằm trong `apps/legend-reel-studio/data/` (`studio.db`, `images/`, `voice/`). **Sao lưu = copy thư mục `data/`**. Thư mục này không bị commit.
+- Nút **“Tải về máy”** trong studio xuất một file `.zip` (bài báo + JSON + ảnh + `ATTRIBUTION.txt` + voice) để mang sang máy khác.
+- Cập nhật code: `git pull` (hoặc tải ZIP mới đè lên) rồi chạy lại `run.sh`/`run.bat`. Giữ nguyên `.venv` và `data/`; nếu `requirements.txt` đổi thì xoá `.venv` để cài lại.
+- Tắt server: `Ctrl + C`. Lần sau chỉ cần chạy lại `run.sh`/`run.bat` (vài giây, không cài lại gì).
+
+### Cần Internet ở đâu?
+
+Studio chạy offline được gần như toàn bộ. Chỉ 2 tính năng cần mạng: **lấy ảnh từ Wikipedia/Commons** và **voice edge-tts**. Không có mạng thì vẫn dùng được: tạo dự án, bài báo, text/voice script, upload ảnh từ máy, đổi banner, tải `.zip`, voice dự phòng bằng `pyttsx3` (giọng hệ thống).
+
+### Nếu gặp lỗi
+
+| Hiện tượng | Cách xử lý |
+| --- | --- |
+| `python: command not found` / “Chua co Python” | Cài Python 3.11+ rồi **mở lại** Terminal; kiểm tra `python -V` |
+| PowerShell: “running scripts is disabled” | `powershell -ExecutionPolicy Bypass -File .\run.ps1` |
+| `No module named venv` (Ubuntu/Debian) | `sudo apt install python3-venv` rồi chạy lại `./run.sh` |
+| `Address already in use` / cổng 8000 bận | Đổi cổng: `PORT=8081 ./run.sh` hoặc `$env:PORT=8081; .\run.ps1` |
+| `pip install` lỗi hoặc treo | Kiểm tra mạng/proxy, chạy lại; hoặc `pip install -r requirements.txt` thủ công để xem lỗi |
+| Không mở được `localhost:8000` | Thử `127.0.0.1:8000`; tắt VPN/proxy; kiểm tra cửa sổ terminal còn chạy |
+| Bấm lấy ảnh báo “Không gọi được API ảnh” | Máy/mạng đang chặn Wikipedia: thử mạng khác, hoặc dán link ảnh / **Tải ảnh lên**, hoặc bấm **“Kiểm tra mạng”** trong tab Ảnh nghệ sĩ để xem lỗi cụ thể |
+| Voice báo lỗi | `edge-tts` cần Internet; `pyttsx3` cần giọng hệ thống — Linux: `sudo apt install espeak-ng`; muốn `.mp3` thì cài thêm `ffmpeg` |
+| Trình duyệt vẫn hiện giao diện cũ | `Ctrl + F5` (máy chủ đã đặt `Cache-Control: no-cache` cho `html/js/css`) |
 
 ## 3. Tài liệu đặc tả
 

@@ -3,19 +3,26 @@ rem Legends Reel Studio - Windows launcher (double-click duoc)
 setlocal
 cd /d "%~dp0"
 
+set "PYEXE=python"
+set "PYARGS="
 where python >nul 2>nul
 if errorlevel 1 (
-  echo.
-  echo Chua co Python. Cai bang:  winget install --id Python.Python.3.12 -e --source winget
-  echo Sau do mo lai cua so nay va chay lai run.bat
-  echo.
-  pause
-  exit /b 1
+  where py >nul 2>nul
+  if errorlevel 1 (
+    echo.
+    echo Chua co Python. Cai bang:  winget install --id Python.Python.3.12 -e --source winget
+    echo Sau do mo lai cua so nay va chay lai run.bat
+    echo.
+    pause
+    exit /b 1
+  )
+  set "PYEXE=py"
+  set "PYARGS=-3"
 )
 
 if not exist ".venv" (
   echo -^> Tao virtualenv .venv
-  python -m venv .venv
+  %PYEXE% %PYARGS% -m venv .venv
   if errorlevel 1 (
     echo Tao .venv that bai. Thu cai Python 3.11+ tu python.org
     pause
@@ -23,7 +30,7 @@ if not exist ".venv" (
   )
 )
 
-".venv\Scripts\python.exe" -c "import fastapi, PIL, edge_tts" >nul 2>nul
+".venv\Scripts\python.exe" -c "import fastapi, PIL, edge_tts, multipart" >nul 2>nul
 if errorlevel 1 (
   echo -^> Cai dependencies ^(lan dau co the mat 1-2 phut^)
   ".venv\Scripts\python.exe" -m pip install -q --upgrade pip
