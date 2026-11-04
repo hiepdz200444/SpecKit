@@ -636,6 +636,18 @@ def index():
     return FileResponse(os.path.join(WEB_DIR, "index.html"))
 
 
+@app.middleware("http")
+async def _fresh_shell(request, call_next):
+    """The shell (html/js/css) must never be served from a stale browser cache."""
+    response = await call_next(request)
+    path = request.url.path
+    if path == "/" or path.endswith((".html", ".js", ".css")):
+        response.headers["Cache-Control"] = "no-cache"
+    elif path.startswith(("/assets/", "/media/")):
+        response.headers.setdefault("Cache-Control", "public, max-age=600")
+    return response
+
+
 app.mount("/assets", StaticFiles(directory=os.path.join(WEB_DIR, "assets")), name="assets")
 app.mount("/media", StaticFiles(directory=DATA_DIR), name="media")
 app.mount("/", StaticFiles(directory=WEB_DIR, html=True), name="web")
