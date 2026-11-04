@@ -34,18 +34,43 @@ def test_overlay_for_release_mentions_subject():
     assert any("I Will Always Love You" in o for o in options)
 
 
+def test_article_lands_inside_700_900_words_for_every_artist():
+    counts = []
+    for artist in library.artists_index():
+        ev = _event(artist["id"], "birthday")
+        for seed in (1, 5, 17):
+            article = content.article_for(artist, ev, seed=seed)
+            counts.append(article["word_count"])
+            assert 700 <= article["word_count"] <= 900, (artist["id"], seed, article["word_count"])
+            assert article["in_range"] is True
+            assert content.article_stats(article["body"])["in_range"] is True
+    assert counts
+
+
 def test_article_has_every_publishing_field():
     artist = library.get_artist("elvis-presley")
     ev = _event("elvis-presley", "birthday")
     article = content.article_for(artist, ev, seed=3)
     assert article["title"] and len(article["title"]) <= 120
     assert len(article["title_variants"]) >= 3
-    assert article["word_count"] > 300
     assert article["body"].count("https://www.youtube.com/") == 3
     assert "first comment" in article["first_comment"].lower()
     assert len(article["hashtags"]) >= 8
+    assert len(article["music_links"]) == 3
+    assert article["word_range"] == [700, 900]
     # deterministic for a given seed
     assert content.article_for(artist, ev, seed=3)["body"] == article["body"]
+
+
+def test_article_stats_flags_out_of_range_bodies():
+    short = content.article_stats("only a handful of words here")
+    assert short["words"] == 6 and short["in_range"] is False
+    long_body = " ".join(["word"] * 950)
+    assert content.article_stats(long_body)["in_range"] is False
+    ok_body = " ".join(["word"] * 800)
+    stats = content.article_stats(ok_body)
+    assert stats["in_range"] is True
+    assert stats["min"] == 700 and stats["max"] == 900
 
 
 def test_article_grammar_uses_object_pronouns_correctly():
@@ -58,41 +83,55 @@ def test_article_grammar_uses_object_pronouns_correctly():
             assert "with he " not in body
 
 
-def test_video_plan_structure_and_copy():
+def test_script_has_text_and_voice_blocks_without_video_plan():
     artist = library.get_artist("freddie-mercury")
     ev = _event("freddie-mercury", "memorial")
     article = content.article_for(artist, ev, seed=2)
-    plan = content.video_for(artist, ev, article, seed=2)
+    plan = content.script_for(artist, ev, article, seed=2)
 
-    assert [s["kind"] for s in plan["scenes"]] == ["hook", "stat", "song", "curiosity", "cta"]
-    assert plan["scenes"][0]["start"] == 0
-    assert plan["scenes"][-1]["end"] == plan["duration"]
-    for a, b in zip(plan["scenes"], plan["scenes"][1:]):
-        assert a["end"] == b["start"]
-
+    assert "scenes" not in plan
+    assert "duration" not in plan
     assert 9 <= plan["overlay_words"] <= 15
-    assert plan["scenes"][0]["text"] == plan["overlay_text"]
+    assert plan["overlay_ok"] is True
+    assert plan["fb_hook"]
     assert "comment" in plan["caption"].lower()
     assert plan["hashtags"]
+    assert "first comment" in plan["first_comment"].lower()
+    assert 25 <= content.word_count(plan["voice_script"]) <= 60
 
 
-def test_checks_flag_bad_overlay():
+def test_normalize_overlay_falls_back_to_a_valid_line():
+    artist = library.get_artist("elvis-presley")
+    ev = _event("elvis-presley", "birthday")
+    assert content.normalize_overlay("too short", artist, ev) != "too short"
+    assert 9 <= content.word_count(content.normalize_overlay("too short", artist, ev)) <= 15
+
+
+def test_checks_flag_bad_copy():
     project = {
         "video_overlay_text": "one two three",
         "caption": "no call to action here",
         "article_title": "ok title",
+        "article_body": "tiny body",
         "hashtags": "#music",
-        "audio_choice": "bed",
+        "images": [],
     }
     checks = {c["id"]: c for c in content.engagement_checks(project)}
     assert checks["overlay_words"]["ok"] is False
+    assert checks["article_words"]["ok"] is False
     assert checks["comment_cta"]["ok"] is False
+    assert checks["images"]["ok"] is False
+    assert checks["banner"]["ok"] is False
+    assert checks["voice"]["ok"] is False
 
     project["video_overlay_text"] = "This is a nine word line that runs to fifteen words total"
     project["caption"] = "Full story in the first comment"
+    project["article_body"] = " ".join(["word"] * 800)
+    project["images"] = [{"id": f"i{i}"} for i in range(20)]
+    project["banner_url"] = "/media/images/x/1.jpg"
+    project["voice"] = {"url": "/media/voice/x.mp3", "engine": "edge-tts"}
     checks = {c["id"]: c for c in content.engagement_checks(project)}
-    assert checks["overlay_words"]["ok"] is True
-    assert checks["comment_cta"]["ok"] is True
+    assert all(c["ok"] for c in checks.values()), checks
 
 
 def test_word_count_handles_punctuation_and_contractions():

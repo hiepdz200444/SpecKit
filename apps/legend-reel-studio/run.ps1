@@ -25,7 +25,7 @@ if (-not (Test-Path ".venv")) {
 $py = Join-Path $PSScriptRoot ".venv\Scripts\python.exe"
 if (-not (Test-Path $py)) { Fail "Khong tim thay $py. Xoa thu muc .venv roi chay lai." }
 
-& $py -c "import fastapi, PIL, imageio_ffmpeg, numpy" 2>&1 | Out-Null
+& $py -c "import fastapi, PIL, edge_tts" 2>&1 | Out-Null
 if ($LASTEXITCODE -ne 0) {
     Write-Host "-> Cai dependencies (lan dau co the mat 1-2 phut)" -ForegroundColor Cyan
     & $py -m pip install -q --upgrade pip
