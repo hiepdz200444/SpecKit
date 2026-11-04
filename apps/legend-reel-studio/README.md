@@ -19,20 +19,37 @@ Một sự kiện (sinh nhật, ngày mất, kỷ niệm phát hành) → **bài
 
 ## 2. Chạy thử
 
-```bash
-cd apps/legend-reel-studio
-./run.sh                 # tạo .venv, cài deps, chạy http://0.0.0.0:8000
+**Cần trước:** Python 3.11+ và Git (Windows: `winget install --id Git.Git -e --source winget` và `winget install --id Python.Python.3.12 -e --source winget`, sau đó mở lại Terminal).
+
+### Windows — PowerShell (khuyến nghị)
+
+```powershell
+git clone -b arena/98aa16d2-speckit https://github.com/hiepdz200444/SpecKit.git
+cd SpecKit\apps\legend-reel-studio
+.\run.ps1
 ```
 
-Hoặc thủ công:
+Nếu PowerShell chặn script: `powershell -ExecutionPolicy Bypass -File .\run.ps1`.
+Hoặc đơn giản nhất: **nháy đúp `run.bat`** trong thư mục `apps\legend-reel-studio`.
+
+### macOS / Linux
 
 ```bash
-python3 -m venv .venv && . .venv/bin/activate
+git clone -b arena/98aa16d2-speckit https://github.com/hiepdz200444/SpecKit.git
+cd SpecKit/apps/legend-reel-studio
+./run.sh                 # tạo .venv, cài deps, chạy http://localhost:8000
+```
+
+### Thủ công (mọi hệ điều hành)
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate        # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-uvicorn app:app --app-dir backend --host 0.0.0.0 --port 8000
+uvicorn app:app --app-dir backend --host 127.0.0.1 --port 8000
 ```
 
-Mở `http://localhost:8000`. Lần render đầu mất ~40–60 giây (720 frame Pillow → H.264). Ảnh/audio/video được lưu trong `data/` (không commit).
+Mở `http://localhost:8000`. Lần render đầu mất ~40–60 giây (720 frame Pillow → H.264). Ảnh/audio/video được lưu trong `data/` (không commit). Đổi cổng: `PORT=8081 ./run.sh` (PowerShell: `$env:PORT=8081; .\run.ps1`).
 
 ## 3. Tài liệu đặc tả
 

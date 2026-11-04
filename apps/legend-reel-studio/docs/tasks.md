@@ -10,6 +10,7 @@
 - [x] T003 Tạo 3 ảnh nền dự phòng 1080×1920 (sân khấu, vinyl, khán giả) trong `web/assets`
 - [x] T004 Cấu hình ffmpeg qua `imageio-ffmpeg` (libx264 + AAC), kiểm tra bằng `ffmpeg -encoders`
 - [x] T005 `.gitignore` cho `data/`, `__pycache__`, `.venv`
+- [x] T005b Launcher Windows `run.ps1` + `run.bat` (tự tạo venv, cài deps, mở server)
 
 ## Phase 2: Foundational
 
