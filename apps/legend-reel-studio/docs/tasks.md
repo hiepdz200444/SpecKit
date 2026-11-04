@@ -52,7 +52,7 @@
 ## Phase 6: Kiểm thử & tài liệu
 
 - [x] T031 `pytest -q` xanh toàn bộ (56 test)
-- [x] T032 `tests/ui_smoke.mjs` (jsdom): sidebar 4 màn hình + render lại, 3 tab, đếm từ, cảnh báo, Copy, banner, zip, voice picker, không còn UI MP4 (46 check)
+- [x] T032 `tests/ui_smoke.mjs` (jsdom): sidebar 4 màn hình + render lại, 3 tab, đếm từ, cảnh báo, Copy, banner, zip, voice picker, không còn UI MP4 (47 check)
 - [x] T033 Cập nhật `README.md`, `docs/spec.md`, `docs/plan.md`, `docs/tasks.md`
 
 ## Phase 7: Lấy ảnh tự động & tải về máy

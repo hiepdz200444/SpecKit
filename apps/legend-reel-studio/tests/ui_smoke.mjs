@@ -280,6 +280,7 @@ async function main() {
     const afterAuto = $$(".img-card").length;
     ok(afterAuto > beforeAuto, `“Tự động lấy ảnh” thêm ${afterAuto - beforeAuto} ảnh dù máy chủ bị chặn mạng`);
     ok(apiCalls.images >= afterAuto - beforeAuto, `trình duyệt đã tải ${apiCalls.images} file ảnh thật`);
+    ok($("#btn-zip").classList.contains("is-hot"), "nút “Tải tất cả (.zip)” được làm nổi bật sau khi lấy ảnh");
     const licLines = $$(".img-card .img-lic").map((el) => el.textContent.trim());
     ok(licLines.length === afterAuto && licLines.some((t) => /CC BY|Public domain/.test(t)), "ảnh tự lấy vẫn giữ dòng giấy phép");
     const attrLines = $$(".img-card .img-attr").map((el) => el.textContent.trim()).filter(Boolean);

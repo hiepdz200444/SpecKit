@@ -52,6 +52,7 @@
     tab: "article",
     suggest: null,
     browserOnly: false,
+    zipHint: false,
     saving: null,
   };
 
@@ -856,6 +857,7 @@
     const imgs = p.images || [];
     const target = p.image_target || 20;
     const canZip = imgs.length > 0;
+    const zipHot = canZip && state.zipHint;
     return `
       <div class="panel">
         <div class="panel-head">
@@ -867,7 +869,7 @@
           <button class="btn btn-sm" id="btn-suggest">${ICON.image} Chọn thủ công</button>
           <button class="btn btn-sm" id="btn-upload-images">${ICON.plus} Tải ảnh lên</button>
           <input type="file" id="img-files" accept="image/*" multiple hidden />
-          <a class="btn btn-sm ${canZip ? "" : "is-disabled"}" ${canZip ? `href="/api/projects/${esc(p.id)}/images.zip"` : ""} id="btn-zip">${ICON.zip} Tải tất cả (.zip)</a>
+          <a class="btn btn-sm ${canZip ? "" : "is-disabled"} ${zipHot ? "is-hot" : ""}" ${canZip ? `href="/api/projects/${esc(p.id)}/images.zip"` : ""} id="btn-zip">${ICON.zip} Tải tất cả (.zip)</a>
         </div>
         <div class="panel-body">
           <div id="img-status" class="img-status" hidden></div>
@@ -1278,9 +1280,10 @@
         added += out.added || 0;
         errors.push(...(out.errors || []));
       }
+      if (added > 0) state.zipHint = true;
       await refreshProject("images");
       if (added > 0) {
-        toast(`Đã lấy ${added} ảnh. Bấm “Tải tất cả (.zip)” để đưa về máy.`, "ok");
+        toast(`Đã lấy ${added} ảnh → bấm “Tải tất cả (.zip)” để lưu cả bộ vào máy (thư mục Downloads).`, "ok");
       } else {
         toast(errors[0] || "Không lấy được ảnh nào", "err");
       }
@@ -1298,6 +1301,8 @@
     const p = state.project;
     if (!state.suggest) state.browserOnly = false;
 
+    const zip = $("#btn-zip");
+    if (zip) zip.addEventListener("click", () => { state.zipHint = false; });
     $("#btn-auto").onclick = () => autoFetchImages();
     $("#btn-suggest").onclick = () => suggestManually();
 

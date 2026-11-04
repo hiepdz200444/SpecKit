@@ -312,6 +312,12 @@ a.song-chip:hover { background: var(--accent-soft); color: #ffd79a; }
 .img-actions .btn { padding: 6px 8px; font-size: 11.5px; }
 .img-actions svg { width: 13px; height: 13px; }
 
+.btn.is-hot { animation: zip-pulse 1.8s ease-in-out infinite; border-color: rgba(240, 176, 76, 0.65); }
+@keyframes zip-pulse {
+  0%, 100% { box-shadow: 0 0 0 rgba(240, 176, 76, 0); }
+  50% { box-shadow: 0 0 0 4px rgba(240, 176, 76, 0.18); }
+}
+
 .img-status { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; padding: 10px 12px; border-radius: 10px; font-size: 12.5px; border: 1px solid var(--line); background: rgba(255,255,255,0.03); color: var(--ink-2); }
 .img-status[hidden] { display: none; }
 .img-status.busy { border-color: rgba(240, 176, 76, 0.35); background: rgba(240, 176, 76, 0.08); color: #ffd79a; }
