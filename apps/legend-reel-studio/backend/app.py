@@ -288,7 +288,7 @@ def apply_generation(project: dict, section: str = "all", seed: int | None = Non
                 "script": plan,
                 "video_overlay_text": plan["overlay_text"],
                 "fb_hook": plan["fb_hook"],
-                "caption": plan["caption"] + "\n\n" + " ".join(plan.get("hashtags") or []),
+                "caption": plan["caption"],
                 "hashtags": " ".join(plan.get("hashtags") or []),
             }
         )
