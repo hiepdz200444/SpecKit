@@ -312,6 +312,13 @@ a.song-chip:hover { background: var(--accent-soft); color: #ffd79a; }
 .img-actions .btn { padding: 6px 8px; font-size: 11.5px; }
 .img-actions svg { width: 13px; height: 13px; }
 
+.img-status { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; padding: 10px 12px; border-radius: 10px; font-size: 12.5px; border: 1px solid var(--line); background: rgba(255,255,255,0.03); color: var(--ink-2); }
+.img-status[hidden] { display: none; }
+.img-status.busy { border-color: rgba(240, 176, 76, 0.35); background: rgba(240, 176, 76, 0.08); color: #ffd79a; }
+.img-status.warn { border-color: rgba(245, 196, 81, 0.35); background: rgba(245, 196, 81, 0.08); color: #f5d98d; }
+.img-status.bad { border-color: rgba(255, 111, 111, 0.4); background: rgba(255, 111, 111, 0.08); color: #ffb4b4; }
+.img-status .spin { width: 12px; height: 12px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.25); border-top-color: var(--accent); animation: spin 0.8s linear infinite; flex: 0 0 auto; }
+
 .suggest-head { display: flex; align-items: center; gap: 10px; margin: 4px 0 10px; flex-wrap: wrap; }
 .suggest-head .spacer { margin-left: auto; }
 .suggest-loading { font-size: 12.5px; color: var(--muted); padding: 14px; border: 1px dashed var(--line-strong); border-radius: 12px; display: flex; align-items: center; gap: 8px; }

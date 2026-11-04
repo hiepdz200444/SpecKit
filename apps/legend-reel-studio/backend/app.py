@@ -352,7 +352,14 @@ def _store_images(pid: str, project: dict, incoming: list[dict]) -> tuple[list[d
         item = dict(record)
         filename = item.pop("filename", "") or "image.jpg"
         raw = item.pop("_raw", b"")
+        data_url = item.pop("data_url", "")
         url = item.get("url") or ""
+        if data_url and not raw:
+            try:
+                raw = images_mod.decode_data_url(data_url)
+            except images_mod.ImageFetchError as exc:
+                errors.append(f"{url or filename}: {exc}")
+                continue
         if url and url in known_urls:
             continue
         try:
@@ -419,7 +426,7 @@ def add_images(pid: str, payload: dict = Body(...)):
         if isinstance(url, str) and url.strip():
             incoming.append({"url": url.strip(), **_meta_from(payload, drop_url=True)})
     for item in payload.get("images") or []:
-        if isinstance(item, dict) and item.get("url"):
+        if isinstance(item, dict) and (item.get("url") or item.get("data_url")):
             incoming.append({k: v for k, v in item.items() if k != "file_url"})
     if not incoming:
         raise HTTPException(400, "Cần ít nhất một link ảnh (url hoặc urls)")
@@ -437,6 +444,35 @@ def _meta_from(payload: dict, drop_url: bool = False) -> dict:
     if drop_url:
         meta.pop("url", None)
     return meta
+
+
+@app.post("/api/projects/{pid}/images/auto")
+def auto_images(pid: str, payload: dict = Body(default={})):
+    """Fetch and store artist photos in one call (server-side download)."""
+    project = get_or_404(pid)
+    artist = library.get_artist(project["artist_id"]) or {}
+    current = list(project.get("images") or [])
+    remaining = MAX_IMAGES - len(current)
+    if remaining <= 0:
+        return {"project": serialize_project(project), "added": 0, "suggested": 0, "errors": [f"Dự án đã đạt {MAX_IMAGES} ảnh"]}
+    try:
+        count = int(payload.get("count") or images_mod.TARGET_IMAGES)
+    except (TypeError, ValueError):
+        count = images_mod.TARGET_IMAGES
+    count = max(1, min(count, remaining))
+    try:
+        data = images_mod.suggest_for_artist(artist, limit=max(count, 24))
+    except images_mod.ImageFetchError as exc:
+        raise HTTPException(502, str(exc)) from exc
+    known_urls = {img.get("url") for img in current if img.get("url")}
+    picks = [c for c in data["images"] if c["url"] not in known_urls][:count]
+    added, errors = _store_images(pid, project, picks)
+    return {
+        "project": serialize_project(get_or_404(pid)),
+        "added": len(added),
+        "suggested": len(data["images"]),
+        "errors": (data.get("errors") or []) + errors,
+    }
 
 
 @app.post("/api/projects/{pid}/images/upload")

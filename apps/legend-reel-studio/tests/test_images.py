@@ -191,3 +191,78 @@ def test_invalid_image_id_is_rejected(project):
     assert client.patch(f"/api/projects/{project['id']}/images/no-such-id", json={"is_banner": True}).status_code == 400
     assert client.delete(f"/api/projects/{project['id']}/images/zzzzzzzz").status_code == 400
     assert client.delete(f"/api/projects/{project['id']}/images/abcdef123456").status_code == 404
+
+
+def test_auto_endpoint_stores_a_full_set_in_one_call(project, fake_network):
+    res = client.post(f"/api/projects/{project['id']}/images/auto", json={"count": 5})
+    assert res.status_code == 200
+    body = res.json()
+    assert body["added"] >= 3
+    assert body["suggested"] >= body["added"]
+    stored = body["project"]["images"]
+    assert len(stored) == body["added"]
+    assert all(img["file_url"].endswith(".jpg") for img in stored)
+    assert any(img["license"] for img in stored)
+    # running it again must not duplicate the same pictures
+    again = client.post(f"/api/projects/{project['id']}/images/auto", json={"count": 5}).json()
+    assert again["added"] == 0
+    assert len(again["project"]["images"]) == len(stored)
+
+
+def test_suggest_flags_the_server_path_when_online(project, fake_network):
+    data = client.get(f"/api/projects/{project['id']}/images/suggest").json()
+    assert data["browser_fallback"] is False
+
+
+def test_suggest_without_network_asks_the_browser_to_take_over(project, monkeypatch):
+    def offline(url, params=None):
+        raise images_mod.ImageFetchError("Không kết nối được Wikipedia")
+
+    monkeypatch.setattr(images_mod, "http_json", offline)
+    res = client.get(f"/api/projects/{project['id']}/images/suggest")
+    assert res.status_code == 502
+    assert "Wikipedia" in res.json()["detail"]
+    auto = client.post(f"/api/projects/{project['id']}/images/auto", json={"count": 5})
+    assert auto.status_code == 502
+
+
+def test_browser_downloaded_bytes_can_be_uploaded_as_data_url(project, fake_network):
+    import base64
+
+    data = client.get(f"/api/projects/{project['id']}/images/suggest").json()
+    cand = data["images"][0]
+    payload = {**cand, "data_url": "data:image/jpeg;base64," + base64.b64encode(JPEG).decode()}
+    res = client.post(f"/api/projects/{project['id']}/images", json={"images": [payload]})
+    assert res.status_code == 200
+    body = res.json()
+    assert body["added"] == 1
+    stored = body["project"]["images"][0]
+    # licence + attribution survive the browser-side download
+    assert stored["license"] == cand["license"]
+    assert stored["attribution"] == cand["attribution"]
+    assert stored["url"] == cand["url"]
+    served = client.get(stored["file_url"])
+    assert served.status_code == 200
+    assert served.content[:2] == b"\xff\xd8"
+
+
+def test_data_url_without_a_source_url_is_accepted(project):
+    import base64
+
+    payload = {"data_url": "data:image/jpeg;base64," + base64.b64encode(JPEG).decode()}
+    body = client.post(f"/api/projects/{project['id']}/images", json={"images": [payload]}).json()
+    assert body["added"] == 1
+    assert body["project"]["images"][0]["source"] == "upload"
+
+
+def test_broken_data_urls_are_reported_not_crashing(project):
+    for bad in ("not-a-data-url", "data:image/jpeg,rawmm", "data:image/jpeg;base64,"):
+        body = client.post(f"/api/projects/{project['id']}/images", json={"images": [{"data_url": bad}]}).json()
+        assert body["added"] == 0
+        assert body["errors"]
+
+
+def test_decode_data_url_rejects_oversized_payload():
+    huge = "data:image/jpeg;base64," + "A" * (images_mod.MAX_BYTES * 2)
+    with pytest.raises(images_mod.ImageFetchError):
+        images_mod.decode_data_url(huge)

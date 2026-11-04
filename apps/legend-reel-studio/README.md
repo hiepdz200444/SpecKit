@@ -90,10 +90,11 @@ Không gọi LLM, nên chạy offline và không tốn phí:
 
 ## 6. Ảnh nghệ sĩ
 
-- **Nguồn tự động**: Wikipedia (ảnh chính của trang nghệ sĩ) + Wikimedia Commons (tìm theo tên nghệ sĩ và tên trang). Mỗi ảnh trả về kèm **giấy phép, URL giấy phép, tác giả** (đã bóc HTML) và **link trang file**.
+- **Một nút “Tự động lấy 20 ảnh”**: gom ảnh từ Wikipedia (ảnh chính của trang nghệ sĩ) + Wikimedia Commons (tìm theo tên nghệ sĩ và tên trang), thêm thẳng vào dự án. Mỗi ảnh trả về kèm **giấy phép, URL giấy phép, tác giả** (đã bóc HTML) và **link trang file**. Muốn xem trước rồi mới chọn thì dùng “Chọn thủ công”.
+- **Máy chủ không có Internet thì trình duyệt tải hộ**: nếu `POST …/images/auto` hoặc `…/images/suggest` không gọi được Wikipedia (mạng công ty chặn, firewall, container không có egress…), studio tự chuyển sang gọi API Wikipedia/Commons **từ trình duyệt của bạn**, tải bytes ảnh bằng `fetch`, rồi gửi lên máy chủ dưới dạng `data_url`. Ảnh vẫn vào đúng thư viện dự án, vẫn giữ license/attribution, và vẫn tải về được bằng `.zip`.
 - **Nguồn do bạn dán**: link ảnh trực tiếp (`.jpg/.png/.webp`) từ bất kỳ host công khai nào — dùng khi bạn có ảnh Pinterest/Getty hợp lệ. Studio **không scrape Pinterest**: nếu bạn dán link trang `pinterest.com/pin/…`, API trả lỗi kèm hướng dẫn *Copy image address*.
 - **Chặn an toàn**: chỉ nhận `http/https`, chặn localhost/dải IP nội bộ, giới hạn 15 MB, kiểm tra content-type và bytes thật bằng Pillow rồi re-encode JPEG (≤ 2000×3000).
-- **Banner + tải về**: ảnh đầu tiên tự thành banner, đổi bất cứ lúc nào; mỗi ảnh có nút Tải về, cả bộ có **Tải tất cả (.zip)** kèm `ATTRIBUTION.txt`.
+- **Banner + tải về máy**: ảnh đầu tiên tự thành banner, đổi bất cứ lúc nào; mỗi ảnh có nút **Tải về**, cả bộ có **Tải tất cả (.zip)** kèm `ATTRIBUTION.txt` — đây là đường đưa ảnh về máy tính của bạn (thư mục Downloads), không phải chỉ xem trong trình duyệt.
 - Hạn mức mềm: mục tiêu **1 banner + 20 ảnh** (tối đa 60 ảnh/dự án).
 
 ## 7. Voice
@@ -120,9 +121,10 @@ API lưu voice vào `data/voice/<project>/`, trả URL để **nghe thử trong 
 | POST | `/api/projects/{id}/generate` | Sinh lại `section=article\|script\|all` với seed mới |
 | POST | `/api/projects/{id}/overlay` | Đặt chữ trên video, trả về số từ + hợp lệ |
 | GET | `/api/projects/{id}/overlay-options` | Gợi ý chữ trên video (tất cả 9–15 từ) |
-| GET | `/api/projects/{id}/images/suggest` | Ảnh gợi ý từ Wikipedia + Commons (license/attribution) |
+| GET | `/api/projects/{id}/images/suggest` | Ảnh gợi ý từ Wikipedia + Commons (license/attribution); trả `502` khi máy chủ không có mạng để UI chuyển sang tải bằng trình duyệt |
+| POST | `/api/projects/{id}/images/auto` | Tự lấy + lưu ảnh trong một lần (`{count}`), dùng cho nút “Tự động lấy 20 ảnh” |
 | GET | `/api/projects/{id}/images` | Ảnh đã lưu trong dự án |
-| POST | `/api/projects/{id}/images` | Thêm ảnh từ `{url}`, `{urls}` hoặc `{images:[…candidate]}` |
+| POST | `/api/projects/{id}/images` | Thêm ảnh từ `{url}`, `{urls}` hoặc `{images:[…candidate]}` — candidate có thể kèm `data_url` (ảnh do trình duyệt tải hộ) |
 | POST | `/api/projects/{id}/images/upload` | Upload nhiều file (multipart) |
 | PATCH/DELETE | `/api/projects/{id}/images/{image_id}` | Đặt làm banner / xoá ảnh |
 | GET | `/api/projects/{id}/images/{image_id}/download` | Tải 1 ảnh |

@@ -86,6 +86,16 @@ async function main() {
   let dom = null;
   let apiCalls = { events: 0, total: 0 };
 
+  const assetBytes = new Uint8Array(await (await nodeFetch(`${base}/assets/bg-stage.jpg`)).arrayBuffer());
+  const CANNED = [
+    { title: "File:Elvis Presley 1970.jpg", url: "https://upload.wikimedia.org/canned/elvis-1970.jpg", width: 1200, height: 1500, license: "Public domain", artist: "Metro-Goldwyn-Mayer" },
+    { title: "File:Elvis Presley 1956.jpg", url: "https://upload.wikimedia.org/canned/elvis-1956.jpg", width: 1000, height: 1250, license: "CC BY-SA 4.0", artist: "Unknown photographer" },
+    { title: "File:Elvis Presley performing.jpg", url: "https://upload.wikimedia.org/canned/elvis-live.jpg", width: 1600, height: 900, license: "Public domain", artist: "RCA Records" },
+    { title: "File:Elvis Presley 1973.jpg", url: "https://upload.wikimedia.org/canned/elvis-1973.jpg", width: 1400, height: 1400, license: "CC BY 2.0", artist: "Fan collection" },
+  ];
+  const jsonRes = (obj) => new Response(JSON.stringify(obj), { status: 200, headers: { "content-type": "application/json" } });
+  const jpegRes = () => new Response(assetBytes, { status: 200, headers: { "content-type": "image/jpeg" } });
+
   try {
     const virtualConsole = new VirtualConsole();
     virtualConsole.on("jsdomError", (err) => {
@@ -106,7 +116,44 @@ async function main() {
       beforeParse(window) {
         window.scrollTo = () => {};
         window.fetch = (input, init) => {
-          const url = String(input).startsWith("http") ? String(input) : new URL(String(input), base).toString();
+          const raw = String(input);
+          if (raw.includes("commons.wikimedia.org/w/api.php")) {
+            apiCalls.wiki = (apiCalls.wiki || 0) + 1;
+            const params = new URL(raw).searchParams;
+            if (params.get("list") === "search") {
+              return Promise.resolve(jsonRes({ query: { search: CANNED.map((c) => ({ title: c.title })) } }));
+            }
+            const pages = {};
+            CANNED.forEach((c, i) => {
+              pages[String(i + 1)] = {
+                title: c.title,
+                imageinfo: [{
+                  url: c.url, thumburl: c.url, width: c.width, height: c.height, mime: "image/jpeg",
+                  extmetadata: {
+                    LicenseShortName: { value: c.license },
+                    Artist: { value: c.artist },
+                    LicenseUrl: { value: "https://creativecommons.org/publicdomain/mark/1.0/" },
+                    ImageDescription: { value: "Ảnh thử nghiệm cho kiểm thử UI" },
+                  },
+                }],
+              };
+            });
+            return Promise.resolve(jsonRes({ query: { pages } }));
+          }
+          if (raw.includes("en.wikipedia.org/api/rest_v1/page/summary/")) {
+            apiCalls.wiki = (apiCalls.wiki || 0) + 1;
+            return Promise.resolve(jsonRes({
+              title: "Elvis Presley",
+              description: "American singer",
+              originalimage: { source: "https://upload.wikimedia.org/canned/elvis-lead.jpg", width: 1200, height: 1500 },
+              thumbnail: { source: "https://upload.wikimedia.org/canned/elvis-lead.jpg" },
+            }));
+          }
+          if (raw.startsWith("https://upload.wikimedia.org/")) {
+            apiCalls.images = (apiCalls.images || 0) + 1;
+            return Promise.resolve(jpegRes());
+          }
+          const url = raw.startsWith("http") ? raw : new URL(raw, base).toString();
           apiCalls.total += 1;
           if (url.includes("/api/events")) apiCalls.events += 1;
           return nodeFetch(url, init);
@@ -225,6 +272,39 @@ async function main() {
     ok($$(".img-card.is-banner").length === 1, "still exactly one banner after the switch");
     ok(/Pinterest/i.test($("#view").textContent), "UI explains the no-Pinterest-scraping policy");
     ok(/Wikipedia/.test($("#view").textContent), "UI offers Wikipedia + Commons import");
+
+    console.log("• Tự động lấy ảnh (máy chủ không có Internet → trình duyệt tải hộ)");
+    const beforeAuto = $$(".img-card").length;
+    click("#btn-auto");
+    await waitFor(() => $$(".img-card").length > beforeAuto, "auto-fetch adds photos", 40000);
+    const afterAuto = $$(".img-card").length;
+    ok(afterAuto > beforeAuto, `“Tự động lấy ảnh” thêm ${afterAuto - beforeAuto} ảnh dù máy chủ bị chặn mạng`);
+    ok(apiCalls.images >= afterAuto - beforeAuto, `trình duyệt đã tải ${apiCalls.images} file ảnh thật`);
+    const licLines = $$(".img-card .img-lic").map((el) => el.textContent.trim());
+    ok(licLines.length === afterAuto && licLines.some((t) => /CC BY|Public domain/.test(t)), "ảnh tự lấy vẫn giữ dòng giấy phép");
+    const attrLines = $$(".img-card .img-attr").map((el) => el.textContent.trim()).filter(Boolean);
+    ok(attrLines.length >= 1, "ảnh tự lấy vẫn giữ tác giả / nguồn");
+
+    const dl = $$(".img-card a[download]").map((a) => a.getAttribute("href")).find((h) => /\/download$/.test(h || ""));
+    const dlRes = await nodeFetch(`${base}${dl}`);
+    const dlBuf = new Uint8Array(await dlRes.arrayBuffer());
+    ok(dlRes.ok && dlBuf[0] === 0xff && dlBuf[1] === 0xd8 && dlBuf.length > 1000, "bấm “Tải về” trả về file JPEG thật");
+
+    const zipRes = await nodeFetch(`${base}/api/projects/${project.id}/images.zip`);
+    const zipBuf = Buffer.from(await zipRes.arrayBuffer());
+    ok(zipRes.ok && /zip/.test(zipRes.headers.get("content-type") || ""), "images.zip trả về file nén");
+    ok(zipBuf.includes(Buffer.from("ATTRIBUTION.txt")), "zip có kèm ATTRIBUTION.txt");
+    ok(($("#btn-zip").getAttribute("href") || "").endsWith("images.zip"), "nút “Tải tất cả (.zip)” trỏ đúng file nén");
+
+    console.log("• Chọn thủ công");
+    click('[data-tab="article"]');
+    await waitFor(() => $(".tabs"), "tabs");
+    click('[data-tab="images"]');
+    await waitFor(() => $("[data-cand], #btn-suggest"), "images tab again");
+    click("#btn-suggest");
+    await waitFor(() => $$("#suggest-panel [data-cand]").length > 0, "suggestion candidates render", 40000);
+    ok($$("#suggest-panel [data-cand]").length >= 3, "panel “Chọn thủ công” liệt kê ảnh gợi ý");
+    ok(/trình duyệt tải hộ/.test($("#suggest-panel").textContent), "panel ghi rõ đang tải bằng trình duyệt");
 
     console.log("• Tab Text & Voice");
     click('[data-tab="script"]');

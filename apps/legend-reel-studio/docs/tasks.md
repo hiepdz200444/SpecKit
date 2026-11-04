@@ -51,9 +51,15 @@
 
 ## Phase 6: Kiểm thử & tài liệu
 
-- [x] T031 `pytest -q` xanh toàn bộ (49 test)
-- [x] T032 `tests/ui_smoke.mjs` (jsdom): sidebar 4 màn hình + render lại, 3 tab, đếm từ, cảnh báo, Copy, banner, zip, voice picker, không còn UI MP4 (36 check)
+- [x] T031 `pytest -q` xanh toàn bộ (56 test)
+- [x] T032 `tests/ui_smoke.mjs` (jsdom): sidebar 4 màn hình + render lại, 3 tab, đếm từ, cảnh báo, Copy, banner, zip, voice picker, không còn UI MP4 (46 check)
 - [x] T033 Cập nhật `README.md`, `docs/spec.md`, `docs/plan.md`, `docs/tasks.md`
+
+## Phase 7: Lấy ảnh tự động & tải về máy
+
+- [x] T040 `POST /api/projects/{id}/images/auto` — lấy + lưu ảnh trong một lần bấm (nút “Tự động lấy 20 ảnh”)
+- [x] T041 Fallback khi máy chủ không có Internet: trình duyệt gọi API Wikipedia/Commons, tải bytes, gửi `data_url` (backend giải mã base64, giữ license/attribution)
+- [x] T042 UI: thanh tiến trình “Đang tải i/n”, nhãn “trình duyệt tải hộ”, nút `.zip` nổi bật + test jsdom mock Wikipedia → zip JPEG thật
 
 ## Backlog (chưa làm)
 

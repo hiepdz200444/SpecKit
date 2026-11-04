@@ -51,6 +51,7 @@
     project: null,
     tab: "article",
     suggest: null,
+    browserOnly: false,
     saving: null,
   };
 
@@ -862,12 +863,18 @@
           <span class="tag ${imgs.length >= target ? "tag-ok" : "tag-warn"}" id="img-count">${imgs.length}/${target} ảnh</span>
           <span class="tiny muted">1 ảnh banner + ${target} ảnh nghệ sĩ</span>
           <div class="spacer"></div>
-          <button class="btn btn-sm btn-primary" id="btn-suggest">${ICON.image} Lấy từ Wikipedia + Commons</button>
+          <button class="btn btn-sm btn-primary" id="btn-auto">${ICON.spark} Tự động lấy ${Math.max(1, target - imgs.length)} ảnh</button>
+          <button class="btn btn-sm" id="btn-suggest">${ICON.image} Chọn thủ công</button>
           <button class="btn btn-sm" id="btn-upload-images">${ICON.plus} Tải ảnh lên</button>
           <input type="file" id="img-files" accept="image/*" multiple hidden />
           <a class="btn btn-sm ${canZip ? "" : "is-disabled"}" ${canZip ? `href="/api/projects/${esc(p.id)}/images.zip"` : ""} id="btn-zip">${ICON.zip} Tải tất cả (.zip)</a>
         </div>
         <div class="panel-body">
+          <div id="img-status" class="img-status" hidden></div>
+          <div class="banner-tip" style="margin-bottom:14px">
+            Studio tự động lấy ảnh từ <b>Wikipedia + Wikimedia Commons</b>, lưu kèm giấy phép &amp; tác giả, rồi đóng gói tất cả vào
+            <b>.zip</b> để bạn tải về máy. Nếu máy chủ không có Internet, trình duyệt của bạn sẽ tải ảnh hộ.
+          </div>
           <div class="field">
             <label>Dán link ảnh từ nguồn khác <span class="hint">mỗi dòng một link ảnh trực tiếp (.jpg/.png/.webp)</span></label>
             <div class="row" style="gap:8px;align-items:flex-start">
@@ -888,7 +895,7 @@
             <span class="tiny muted">Ảnh đầu tiên tự thành banner — có thể đổi bất cứ lúc nào</span>
           </div>
           <div id="img-grid" class="img-grid">
-            ${imgs.length ? imgs.map(imageCard).join("") : `<div class="empty" style="grid-column:1/-1"><h3>Chưa có ảnh nào</h3><p>Bấm “Lấy từ Wikipedia + Commons” để lấy ảnh tự động, hoặc dán link ảnh / tải ảnh lên.</p></div>`}
+            ${imgs.length ? imgs.map(imageCard).join("") : `<div class="empty" style="grid-column:1/-1"><h3>Chưa có ảnh nào</h3><p>Bấm “Tự động lấy 20 ảnh” để studio gom ảnh từ Wikipedia + Commons, hoặc dán link ảnh / tải ảnh lên.</p></div>`}
           </div>
         </div>
       </div>`;
@@ -918,90 +925,408 @@
       </figure>`;
   }
 
+  // ---------------------------------------------- image sources (server + browser)
+  const COMMONS_API = "https://commons.wikimedia.org/w/api.php";
+  const WIKI_REST = "https://en.wikipedia.org/api/rest_v1/page/summary/";
+  const IMAGE_MAX_BYTES = 15 * 1024 * 1024;
+
+  const stripHtml = (value) => String(value || "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+
+  function setImgStatus(text, kind = "") {
+    const el = $("#img-status");
+    if (!el) return;
+    if (!text) { el.hidden = true; el.textContent = ""; return; }
+    el.hidden = false;
+    el.className = `img-status ${kind}`;
+    el.innerHTML = `${kind === "busy" ? '<span class="spin"></span>' : ""}${esc(text)}`;
+  }
+
+  async function wikipediaCandidatesInBrowser(artist) {
+    const slug = encodeURIComponent(artist.wikipedia || artist.name || "");
+    const res = await fetch(`${WIKI_REST}${slug}`, { headers: { Accept: "application/json" } });
+    if (!res.ok) return [];
+    const data = await res.json();
+    const src = data?.originalimage?.source || data?.thumbnail?.source;
+    if (!src) return [];
+    return [{
+      source: "wikipedia",
+      title: `${data.title || artist.name} — ảnh chính Wikipedia`,
+      url: src,
+      thumb_url: data?.thumbnail?.source || src,
+      page_url: `https://en.wikipedia.org/wiki/${slug}`,
+      width: Number(data?.originalimage?.width || 0),
+      height: Number(data?.originalimage?.height || 0),
+      license: "Wikipedia (kiểm tra trang file)",
+      license_url: "",
+      attribution: `Nguồn: Wikipedia — ${artist.name || ""}`,
+      description: String(data?.description || ""),
+    }];
+  }
+
+  async function commonsCandidatesInBrowser(artist, limit) {
+    const searches = [
+      artist.wikipedia ? String(artist.wikipedia).replace(/_/g, " ") : "",
+      `${artist.name} portrait`,
+      `${artist.name} singer`,
+      artist.name,
+    ].filter(Boolean);
+    const titles = [];
+    for (const term of searches) {
+      if (titles.length >= limit * 2) break;
+      const params = new URLSearchParams({
+        action: "query", format: "json", origin: "*", list: "search",
+        srsearch: term, srnamespace: "6", srlimit: String(limit),
+      });
+      const res = await fetch(`${COMMONS_API}?${params}`);
+      if (!res.ok) throw new Error(`Commons ${res.status}`);
+      const data = await res.json();
+      for (const item of data?.query?.search || []) {
+        if (item.title && !titles.includes(item.title)) titles.push(item.title);
+      }
+    }
+    const out = [];
+    for (let i = 0; i < titles.length; i += 20) {
+      const params = new URLSearchParams({
+        action: "query", format: "json", origin: "*", titles: titles.slice(i, i + 20).join("|"),
+        prop: "imageinfo", iiprop: "url|size|mime|extmetadata", iiurlwidth: "1200",
+      });
+      const data = await fetch(`${COMMONS_API}?${params}`).then((r) => r.json());
+      for (const page of Object.values(data?.query?.pages || {})) {
+        const info = (page.imageinfo || [])[0] || {};
+        const mime = String(info.mime || "").toLowerCase();
+        if (!mime.startsWith("image/") || mime.includes("svg")) continue;
+        const width = Number(info.width || 0);
+        const height = Number(info.height || 0);
+        if (width < 400 || height < 400 || !info.url) continue;
+        const meta = info.extmetadata || {};
+        const val = (key) => stripHtml(meta[key]?.value || "");
+        const title = String(page.title || "").replace(/^File:/, "");
+        out.push({
+          source: "wikimedia",
+          title,
+          url: info.url,
+          thumb_url: info.thumburl || info.url,
+          page_url: `https://commons.wikimedia.org/wiki/File:${encodeURIComponent(title)}`,
+          width, height,
+          license: val("LicenseShortName") || "không rõ",
+          license_url: val("LicenseUrl"),
+          attribution: val("Artist") || val("Credit"),
+          description: val("ImageDescription").slice(0, 280),
+        });
+      }
+    }
+    return out;
+  }
+
+  async function browserSuggest(artist, limit) {
+    const errors = [];
+    let images = [];
+    try {
+      images = images.concat(await wikipediaCandidatesInBrowser(artist || {}));
+    } catch (err) {
+      errors.push(`Wikipedia: ${err.message}`);
+    }
+    try {
+      images = images.concat(await commonsCandidatesInBrowser(artist || {}, limit));
+    } catch (err) {
+      errors.push(`Commons: ${err.message}`);
+    }
+    const seen = new Set();
+    const unique = images.filter((img) => img.url && !seen.has(img.url) && seen.add(img.url));
+    if (!unique.length) throw new Error(errors.join(" · ") || "Trình duyệt không lấy được ảnh");
+    return {
+      images: unique,
+      sources: ["Wikipedia", "Wikimedia Commons"],
+      errors,
+      existing: (state.project?.images || []).length,
+      browser_fallback: true,
+    };
+  }
+
+  /** Ask the server first; if it has no internet, pull the list in the browser. */
+  async function fetchSuggestions(limit) {
+    const p = state.project;
+    try {
+      const data = await api(`/api/projects/${p.id}/images/suggest?limit=${limit}`);
+      if (!data.images?.length) throw new Error((data.errors || []).join(" · ") || "không có ảnh");
+      state.browserOnly = false;
+      return data;
+    } catch (err) {
+      const local = await browserSuggest(p.artist || {}, limit);
+      state.browserOnly = true;
+      local.errors = [`Máy chủ chưa gọi được Wikipedia (${err.message}) → trình duyệt tự tải ảnh hộ.`, ...(local.errors || [])];
+      return local;
+    }
+  }
+
+  async function blobToDataUrl(blob) {
+    const bytes = new Uint8Array(await blob.arrayBuffer());
+    let binary = "";
+    const chunk = 0x8000;
+    for (let i = 0; i < bytes.length; i += chunk) {
+      binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
+    }
+    return `data:${blob.type || "image/jpeg"};base64,${btoa(binary)}`;
+  }
+
+  async function fetchImageAsDataUrl(url) {
+    const res = await fetch(url, { mode: "cors" });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const blob = await res.blob();
+    if (!String(blob.type || "").startsWith("image/")) throw new Error("không phải file ảnh");
+    if (blob.size > IMAGE_MAX_BYTES) throw new Error("ảnh lớn hơn 15 MB");
+    return blobToDataUrl(blob);
+  }
+
+  /** Wikimedia blocks nothing, but thumbnails are smaller and always CORS-enabled. */
+  async function fetchImageBytes(item) {
+    const urls = [item.thumb_url, item.url].filter((v, i, arr) => v && arr.indexOf(v) === i);
+    let lastErr = null;
+    for (const url of urls) {
+      try {
+        return await fetchImageAsDataUrl(url);
+      } catch (err) {
+        lastErr = err;
+      }
+    }
+    throw lastErr || new Error("không tải được ảnh");
+  }
+
+  const uploadShape = (item) => {
+    const out = {};
+    ["url", "source", "title", "page_url", "license", "license_url", "attribution", "description"].forEach((key) => {
+      if (item[key]) out[key] = item[key];
+    });
+    return out;
+  };
+
+  /**
+   * Add images: the server downloads them when it can, otherwise (offline /
+   * blocked network) the browser downloads the bytes and posts them as data URLs.
+   */
+  async function addPickedImages(picked, onProgress) {
+    const p = state.project;
+    let added = 0;
+    const errors = [];
+    let pending = picked.slice();
+
+    if (!state.browserOnly && pending.length) {
+      try {
+        const res = await api(`/api/projects/${p.id}/images`, {
+          method: "POST",
+          body: { images: pending.map(uploadShape) },
+        });
+        added += res.added || 0;
+        errors.push(...(res.errors || []));
+        state.project = res.project;
+        const have = new Set((res.project.images || []).map((img) => img.url).filter(Boolean));
+        pending = pending.filter((item) => !have.has(item.url));
+      } catch (err) {
+        errors.push(err.message);
+      }
+    }
+
+    for (let i = 0; i < pending.length; i++) {
+      const item = pending[i];
+      if (onProgress) onProgress(i + 1, pending.length, item);
+      try {
+        const dataUrl = await fetchImageBytes(item);
+        const res = await api(`/api/projects/${p.id}/images`, {
+          method: "POST",
+          body: { images: [{ ...uploadShape(item), data_url: dataUrl }] },
+        });
+        added += res.added || 0;
+        errors.push(...(res.errors || []));
+        state.project = res.project;
+      } catch (err) {
+        errors.push(`${item.title || item.url}: ${err.message}`);
+      }
+    }
+    return { added, errors };
+  }
+
+  function renderSuggestions(data) {
+    const images = data.images || [];
+    if (!images.length) {
+      return `<div class="warn-line">Không tìm thấy ảnh mới trên Wikipedia/Commons. Thử dán link ảnh hoặc tải ảnh lên.</div>`;
+    }
+    const errors = (data.errors || []).map((e) => `<div class="tiny muted">• ${esc(e)}</div>`).join("");
+    const badge = data.browser_fallback
+      ? `<span class="tag tag-warn">trình duyệt tải hộ</span>`
+      : `<span class="tag tag-ok">máy chủ tải</span>`;
+    return `
+      <div class="suggest-head">
+        <b style="font-size:13px">${images.length} ảnh gợi ý từ ${esc((data.sources || []).join(" + "))}</b>
+        ${badge}
+        <span class="tiny muted">đã có ${data.existing || 0} ảnh trong dự án</span>
+        <div class="spacer"></div>
+        <button class="btn btn-sm btn-ghost" id="cand-all">Chọn tất cả</button>
+        <button class="btn btn-sm btn-primary" id="btn-add-cands" disabled>${ICON.plus} Thêm 0 ảnh đã chọn</button>
+      </div>
+      ${errors}
+      <div class="cand-grid">
+        ${images.map((img, i) => `
+          <label class="cand">
+            <input type="checkbox" data-cand="${i}" />
+            <img src="${esc(img.thumb_url || img.url)}" alt="" loading="lazy" />
+            <span class="cand-meta">
+              <span class="cand-title" title="${esc(img.title || "")}">${esc(img.title || "Ảnh")}</span>
+              <span class="cand-lic">${esc(img.license || "không rõ")}</span>
+              ${img.attribution ? `<span class="cand-attr" title="${esc(img.attribution)}">${esc(img.attribution)}</span>` : ""}
+            </span>
+          </label>`).join("")}
+      </div>
+      <div class="banner-tip">Giấy phép và tác giả được lưu cùng ảnh và xuất kèm trong file .zip (ATTRIBUTION.txt).</div>`;
+  }
+
+  function bindSuggestions() {
+    const all = $("#cand-all");
+    if (all) {
+      all.onclick = () => {
+        const boxes = $$("#suggest-panel [data-cand]");
+        const turnOn = boxes.some((b) => !b.checked);
+        boxes.forEach((b) => { b.checked = turnOn; });
+        updateSelected();
+      };
+    }
+    $$("#suggest-panel [data-cand]").forEach((box) => box.addEventListener("change", updateSelected));
+    const add = $("#btn-add-cands");
+    if (add) add.onclick = () => addSelected();
+    updateSelected();
+  }
+
+  function updateSelected() {
+    const n = $$("#suggest-panel [data-cand]").filter((b) => b.checked).length;
+    const btn = $("#btn-add-cands");
+    if (btn) {
+      btn.disabled = n === 0;
+      btn.innerHTML = `${ICON.plus} Thêm ${n} ảnh đã chọn`;
+    }
+  }
+
+  async function addSelected() {
+    const chosen = $$("#suggest-panel [data-cand]").filter((b) => b.checked).map((b) => Number(b.dataset.cand));
+    const picked = (state.suggest?.images || []).filter((_, i) => chosen.includes(i));
+    if (!picked.length) return;
+    const btn = $("#btn-add-cands");
+    if (btn) { btn.disabled = true; btn.innerHTML = "Đang tải ảnh…"; }
+    setImgStatus(`Đang thêm ${picked.length} ảnh…`, "busy");
+    try {
+      const { added, errors } = await addPickedImages(picked, (i, n) => setImgStatus(`Đang tải ảnh ${i}/${n} bằng trình duyệt…`, "busy"));
+      toast(`Đã thêm ${added} ảnh`, added ? "ok" : "err");
+      errors.slice(0, 3).forEach((err) => toast(err, "err"));
+      state.suggest = null;
+      await refreshProject("images");
+    } catch (err) {
+      toast(err.message, "err");
+      setImgStatus(err.message, "bad");
+      if (btn) { btn.disabled = false; updateSelected(); }
+    }
+  }
+
+  async function refreshProject(tab) {
+    state.project = await api(`/api/projects/${state.project.id}`);
+    if (tab) state.tab = tab;
+    renderStudioShell();
+  }
+
+  async function suggestManually() {
+    const btn = $("#btn-suggest");
+    const panel = $("#suggest-panel");
+    btn.disabled = true;
+    panel.innerHTML = `<div class="suggest-loading">${ICON.refresh} Đang hỏi Wikipedia + Wikimedia Commons…</div>`;
+    try {
+      const data = await fetchSuggestions(24);
+      state.suggest = data;
+      panel.innerHTML = renderSuggestions(data);
+      bindSuggestions();
+      setImgStatus(data.browser_fallback ? "Máy chủ không có Internet — trình duyệt sẽ tải ảnh khi bạn bấm Thêm." : "", data.browser_fallback ? "warn" : "");
+    } catch (err) {
+      state.suggest = null;
+      panel.innerHTML = `<div class="warn-line bad">! ${esc(err.message)}</div>
+        <div class="banner-tip">Không lấy được ảnh tự động (mạng bị chặn?). Bạn vẫn có thể dán link ảnh hoặc tải ảnh lên.</div>`;
+      setImgStatus(err.message, "bad");
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  async function autoFetchImages() {
+    const p = state.project;
+    const target = p.image_target || 20;
+    const remaining = Math.max(1, target - (p.images || []).length);
+    const btn = $("#btn-auto");
+    btn.disabled = true;
+    setImgStatus(`Đang lấy ${remaining} ảnh từ Wikipedia + Commons…`, "busy");
+    try {
+      let added = 0;
+      const errors = [];
+      try {
+        const res = await api(`/api/projects/${p.id}/images/auto`, { method: "POST", body: { count: remaining } });
+        added += res.added || 0;
+        errors.push(...(res.errors || []));
+        state.project = res.project;
+        if (added > 0) state.browserOnly = false;
+        else throw new Error((res.errors || [])[0] || "máy chủ không tải được ảnh");
+      } catch (err) {
+        // server has no outbound Internet → let the browser do the downloading
+        setImgStatus(`${err.message} → trình duyệt tự tải…`, "busy");
+        const data = await fetchSuggestions(Math.max(remaining * 3, 24));
+        const picked = (data.images || []).slice(0, remaining);
+        if (!picked.length) throw new Error("Không tìm thấy ảnh cho nghệ sĩ này");
+        const out = await addPickedImages(picked, (i, n) => setImgStatus(`Đang tải ảnh ${i}/${n} bằng trình duyệt…`, "busy"));
+        added += out.added || 0;
+        errors.push(...(out.errors || []));
+      }
+      await refreshProject("images");
+      if (added > 0) {
+        toast(`Đã lấy ${added} ảnh. Bấm “Tải tất cả (.zip)” để đưa về máy.`, "ok");
+      } else {
+        toast(errors[0] || "Không lấy được ảnh nào", "err");
+      }
+      errors.slice(0, 3).forEach((err) => toast(err, "err"));
+    } catch (err) {
+      toast(err.message, "err");
+      setImgStatus(err.message, "bad");
+    } finally {
+      const again = $("#btn-auto");
+      if (again) again.disabled = false;
+    }
+  }
+
   function bindImagesTab() {
     const p = state.project;
+    if (!state.suggest) state.browserOnly = false;
 
-    const refresh = async () => {
-      state.project = await api(`/api/projects/${p.id}`);
-      state.tab = "images";
-      renderTab();
-    };
-
-    $("#btn-suggest").onclick = async (e) => {
-      const btn = e.currentTarget;
-      btn.disabled = true;
-      const panel = $("#suggest-panel");
-      panel.innerHTML = `<div class="suggest-loading">${ICON.refresh} Đang hỏi Wikipedia + Wikimedia Commons…</div>`;
-      try {
-        const data = await api(`/api/projects/${p.id}/images/suggest?limit=24`);
-        state.suggest = data;
-        panel.innerHTML = renderSuggestions(data);
-        bindSuggestions();
-      } catch (err) {
-        panel.innerHTML = `<div class="warn-line bad">! ${esc(err.message)}</div>
-          <div class="banner-tip">Không lấy được ảnh tự động (có thể do mạng). Bạn vẫn có thể dán link ảnh hoặc tải ảnh lên.</div>`;
-      } finally {
-        btn.disabled = false;
-      }
-    };
-
-    const bindSuggestions = () => {
-      const panel = $("#suggest-panel");
-      const all = $("#cand-all");
-      if (all) {
-        all.onclick = () => {
-          const boxes = $$("#suggest-panel [data-cand]");
-          const turnOn = boxes.some((b) => !b.checked);
-          boxes.forEach((b) => { b.checked = turnOn; });
-          updateSelected();
-        };
-      }
-      $$("#suggest-panel [data-cand]").forEach((box) => box.addEventListener("change", updateSelected));
-      const add = $("#btn-add-cands");
-      if (add) add.onclick = () => addSelected();
-      updateSelected();
-    };
-
-    const updateSelected = () => {
-      const n = $$("#suggest-panel [data-cand]").filter((b) => b.checked).length;
-      const btn = $("#btn-add-cands");
-      if (btn) {
-        btn.disabled = n === 0;
-        btn.innerHTML = `${ICON.plus} Thêm ${n} ảnh đã chọn`;
-      }
-    };
-
-    const addSelected = async () => {
-      const chosen = $$("#suggest-panel [data-cand]").filter((b) => b.checked).map((b) => Number(b.dataset.cand));
-      const picked = (state.suggest?.images || []).filter((_, i) => chosen.includes(i));
-      if (!picked.length) return;
-      const btn = $("#btn-add-cands");
-      if (btn) { btn.disabled = true; btn.innerHTML = "Đang tải ảnh…"; }
-      try {
-        const res = await api(`/api/projects/${p.id}/images`, { method: "POST", body: { images: picked } });
-        toast(`Đã thêm ${res.added} ảnh`, "ok");
-        if (res.errors?.length) toast(res.errors[0], "err");
-        state.suggest = null;
-        await refresh();
-      } catch (err) {
-        toast(err.message, "err");
-        if (btn) { btn.disabled = false; updateSelected(); }
-      }
-    };
+    $("#btn-auto").onclick = () => autoFetchImages();
+    $("#btn-suggest").onclick = () => suggestManually();
 
     $("#btn-import-urls").onclick = async (e) => {
       const btn = e.currentTarget;
-      const raw = ($("#img-urls").value || "").split(/\s*\n\s*/).map((s) => s.trim()).filter(Boolean);
+      const raw = ($("#img-urls").value || "").split(/\s*\n\s*/).map((x) => x.trim()).filter(Boolean);
       if (!raw.length) return toast("Dán ít nhất một link ảnh", "err");
       btn.disabled = true;
       btn.innerHTML = "Đang tải ảnh…";
+      setImgStatus(`Đang tải ${raw.length} link…`, "busy");
       try {
         const res = await api(`/api/projects/${p.id}/images`, { method: "POST", body: { urls: raw } });
-        toast(`Đã tải ${res.added}/${raw.length} ảnh`, res.added ? "ok" : "err");
-        (res.errors || []).slice(0, 3).forEach((err) => toast(err, "err"));
-        await refresh();
+        let added = res.added || 0;
+        const errors = [...(res.errors || [])];
+        state.project = res.project;
+        const have = new Set((res.project.images || []).map((img) => img.url).filter(Boolean));
+        const pending = raw.filter((url) => !have.has(url));
+        if (pending.length) {
+          setImgStatus("Máy chủ không tải được — thử tải bằng trình duyệt…", "busy");
+          const out = await addPickedImages(pending.map((url) => ({ url })), (i, n) => setImgStatus(`Đang tải ${i}/${n} bằng trình duyệt…`, "busy"));
+          added += out.added || 0;
+          errors.push(...out.errors);
+        }
+        toast(`Đã tải ${added}/${raw.length} ảnh`, added ? "ok" : "err");
+        errors.slice(0, 3).forEach((err) => toast(err, "err"));
+        await refreshProject("images");
       } catch (err) {
         toast(err.message, "err");
+        setImgStatus(err.message, "bad");
       } finally {
         btn.disabled = false;
         btn.innerHTML = `${ICON.link} Tải ảnh từ link`;
@@ -1014,13 +1339,15 @@
       if (!files.length) return;
       const fd = new FormData();
       files.forEach((f) => fd.append("files", f, f.name));
+      setImgStatus(`Đang tải ${files.length} ảnh lên…`, "busy");
       try {
         const res = await api(`/api/projects/${p.id}/images/upload`, { method: "POST", body: fd });
         toast(`Đã thêm ${res.added} ảnh`, "ok");
         (res.errors || []).slice(0, 2).forEach((err) => toast(err, "err"));
-        await refresh();
+        await refreshProject("images");
       } catch (err) {
         toast(err.message, "err");
+        setImgStatus(err.message, "bad");
       }
     };
 
@@ -1051,36 +1378,6 @@
       $("#suggest-panel").innerHTML = renderSuggestions(state.suggest);
       bindSuggestions();
     }
-  }
-
-  function renderSuggestions(data) {
-    const images = data.images || [];
-    if (!images.length) {
-      return `<div class="warn-line">Không tìm thấy ảnh mới trên Wikipedia/Commons. Thử dán link ảnh hoặc tải ảnh lên.</div>`;
-    }
-    const errors = (data.errors || []).map((e) => `<div class="tiny muted">• ${esc(e)}</div>`).join("");
-    return `
-      <div class="suggest-head">
-        <b style="font-size:13px">${images.length} ảnh gợi ý từ ${esc((data.sources || []).join(" + "))}</b>
-        <span class="tiny muted">đã có ${data.existing || 0} ảnh trong dự án</span>
-        <div class="spacer"></div>
-        <button class="btn btn-sm btn-ghost" id="cand-all">Chọn tất cả</button>
-        <button class="btn btn-sm btn-primary" id="btn-add-cands" disabled>${ICON.plus} Thêm 0 ảnh đã chọn</button>
-      </div>
-      ${errors}
-      <div class="cand-grid">
-        ${images.map((img, i) => `
-          <label class="cand">
-            <input type="checkbox" data-cand="${i}" />
-            <img src="${esc(img.thumb_url || img.url)}" alt="" loading="lazy" />
-            <span class="cand-meta">
-              <span class="cand-title" title="${esc(img.title || "")}">${esc(img.title || "Ảnh")}</span>
-              <span class="cand-lic">${esc(img.license || "không rõ")}</span>
-              ${img.attribution ? `<span class="cand-attr" title="${esc(img.attribution)}">${esc(img.attribution)}</span>` : ""}
-            </span>
-          </label>`).join("")}
-      </div>
-      <div class="banner-tip">Giấy phép và tác giả được lưu cùng ảnh và xuất kèm trong file .zip (ATTRIBUTION.txt).</div>`;
   }
 
   // ------------------------------------------------------------------ script tab

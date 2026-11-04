@@ -11,6 +11,7 @@ Rules baked into this module:
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import io
 import json
@@ -26,7 +27,7 @@ WIKI_API = "https://en.wikipedia.org/w/api.php"
 COMMONS_API = "https://commons.wikimedia.org/w/api.php"
 COMMONS_FILE_PAGE = "https://commons.wikimedia.org/wiki/File:"
 MAX_BYTES = 15 * 1024 * 1024
-TIMEOUT = 15
+TIMEOUT = 8
 TARGET_IMAGES = 20
 OK_MIME = {"image/jpeg", "image/png", "image/webp", "image/gif", "image/bmp"}
 
@@ -150,12 +151,13 @@ def commons_candidates(wiki_title: str, artist_name: str, limit: int = 30) -> li
     if wiki_title:
         searches.append((wiki_title.replace("_", " "), 6))
     if artist_name:
+        searches.append((f"{artist_name} portrait", 6))
         searches.append((f"{artist_name} singer", 6))
         searches.append((artist_name, 6))
 
     titles: list[str] = []
     for term, namespace in searches:
-        if len(titles) >= limit:
+        if len(titles) >= limit * 2:
             break
         try:
             data = http_json(
@@ -170,7 +172,10 @@ def commons_candidates(wiki_title: str, artist_name: str, limit: int = 30) -> li
                 },
             )
         except ImageFetchError:
-            continue
+            # network is down: no point hammering the API with the other terms
+            if not titles:
+                raise
+            break
         for item in (data.get("query") or {}).get("search") or []:
             t = item.get("title") or ""
             if t and t not in titles:
@@ -246,17 +251,40 @@ def suggest_for_artist(artist: dict, limit: int = TARGET_IMAGES) -> dict:
             continue
         seen.add(cand["url"])
         unique.append(cand)
+    if not unique:
+        detail = "; ".join(errors) if errors else "Wikipedia/Commons không có ảnh cho nghệ sĩ này"
+        raise ImageFetchError(f"Không lấy được ảnh tự động. {detail}")
     return {
         "images": unique[: max(limit, 24)],
         "target": TARGET_IMAGES,
         "errors": errors,
         "sources": ["Wikipedia", "Wikimedia Commons"],
+        "browser_fallback": False,
     }
 
 
 # --------------------------------------------------------------------------- #
 # Storing images                                                              #
 # --------------------------------------------------------------------------- #
+def decode_data_url(value: str) -> bytes:
+    """Decode a data:image/...;base64 payload sent by the browser fallback."""
+    value = (value or "").strip()
+    if not value.startswith("data:"):
+        raise ImageFetchError("data_url không hợp lệ")
+    header, _, payload = value.partition(",")
+    if ";base64" not in header:
+        raise ImageFetchError("data_url phải là base64")
+    try:
+        raw = base64.b64decode(payload, validate=False)
+    except (ValueError, TypeError) as exc:
+        raise ImageFetchError("data_url không giải mã được") from exc
+    if not raw:
+        raise ImageFetchError("data_url rỗng")
+    if len(raw) > MAX_BYTES:
+        raise ImageFetchError("Ảnh quá lớn (giới hạn 15 MB)")
+    return raw
+
+
 def normalize(raw: bytes) -> tuple[bytes, int, int]:
     """Validate the bytes are a real image and return a JPEG (max 2400px)."""
     try:

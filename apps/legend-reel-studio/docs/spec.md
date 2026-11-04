@@ -106,7 +106,8 @@ Người dùng xem toàn bộ dự án, lọc theo trạng thái, tìm kiếm, m
 
 - Ngày không có sự kiện → empty state có hành động "mở rộng ±30 ngày".
 - Nghệ sĩ không có ảnh trên Wikipedia → thông báo lỗi rõ ràng, vẫn cho dán link/upload; banner fallback về ảnh nền sân khấu.
-- Nghệ sĩ không có trang Wikipedia hoặc Commons không có ảnh → `suggest` trả danh sách rỗng + lý do, không crash.
+- Nghệ sĩ không có trang Wikipedia hoặc Commons không có ảnh → `suggest` trả `502` + lý do, UI hiện hướng dẫn dán link/upload, không crash.
+- Máy chủ không có Internet (firewall/container) → UI tự gọi API Wikipedia/Commons từ trình duyệt, tải bytes ảnh rồi gửi lên bằng `data_url`; ảnh vẫn vào dự án với license/attribution và vẫn tải về được bằng `.zip`.
 - Ảnh rất dọc/rất ngang → chuẩn hoá về JPEG ≤ 2000×3000, không méo; ảnh PNG trong suốt được đặt trên nền tối.
 - Link ảnh trả về HTML hoặc > 15 MB → từ chối kèm lý do.
 - Bài báo dài quá 900 hoặc ngắn dưới 700 từ → cảnh báo nhưng không chặn lưu.
@@ -136,6 +137,8 @@ Người dùng xem toàn bộ dự án, lọc theo trạng thái, tìm kiếm, m
 - **FR-016**: Sidebar PHẢI điều hướng được cả 4 màn hình và render lại khi bấm lại mục đang mở.
 - **FR-017**: Hệ thống PHẢI chạy offline (trừ hai tính năng cần mạng: lấy ảnh và edge-tts), không phụ thuộc LLM hay API trả phí.
 - **FR-018**: Giao diện PHẢI là tiếng Việt, nội dung xuất bản là tiếng Anh (thị trường Mỹ).
+- **FR-019**: Nút “Tự động lấy 20 ảnh” PHẢI lấy và lưu ảnh trong một lần bấm (`POST /images/auto`); khi máy chủ không có Internet, studio PHẢI tự chuyển sang tải ảnh bằng trình duyệt và upload qua `data_url`, kèm tiến trình “Đang tải i/n”.
+- **FR-020**: Sau khi lấy ảnh, người dùng PHẢI tải được ảnh về máy: từng ảnh qua nút “Tải về”, cả bộ qua `images.zip` (JPEG + `ATTRIBUTION.txt`).
 
 ### Key Entities
 
