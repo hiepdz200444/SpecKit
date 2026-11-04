@@ -1,4 +1,4 @@
-"""SQLite storage for reels projects."""
+"""SQLite storage for reel projects (article + images + text/voice)."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ APP_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.environ.get("LRS_DATA_DIR") or os.path.join(APP_DIR, "data")
 DB_PATH = os.path.join(DATA_DIR, "studio.db")
 
-STATUSES = ["draft", "article", "video", "ready", "scheduled", "published"]
+STATUSES = ["draft", "article", "script", "ready", "scheduled", "published"]
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS projects (
@@ -23,23 +23,18 @@ CREATE TABLE IF NOT EXISTS projects (
     status TEXT NOT NULL DEFAULT 'draft',
     seed INTEGER NOT NULL DEFAULT 1,
     article_title TEXT DEFAULT '',
-    article_dek TEXT DEFAULT '',
     article_body TEXT DEFAULT '',
     article_titles_json TEXT DEFAULT '[]',
     first_comment TEXT DEFAULT '',
     hashtags TEXT DEFAULT '',
     banner_image TEXT DEFAULT '',
     music_links_json TEXT DEFAULT '[]',
+    images_json TEXT DEFAULT '[]',
     video_overlay_text TEXT DEFAULT '',
     fb_hook TEXT DEFAULT '',
     caption TEXT DEFAULT '',
-    video_plan_json TEXT DEFAULT '{}',
-    video_style TEXT DEFAULT 'noir',
-    audio_choice TEXT DEFAULT '',
-    audio_path TEXT DEFAULT '',
-    render_path TEXT DEFAULT '',
-    render_status TEXT DEFAULT '',
-    render_seconds REAL DEFAULT 0,
+    script_json TEXT DEFAULT '{}',
+    voice_json TEXT DEFAULT '{}',
     notes TEXT DEFAULT '',
     scheduled_for TEXT DEFAULT '',
     created_at TEXT NOT NULL,
@@ -58,6 +53,45 @@ CREATE TABLE IF NOT EXISTS custom_events (
 );
 """
 
+# columns added after the first release; created on old databases by init_db()
+ADDED_COLUMNS = {
+    "images_json": "TEXT DEFAULT '[]'",
+    "script_json": "TEXT DEFAULT '{}'",
+    "voice_json": "TEXT DEFAULT '{}'",
+}
+
+JSON_FIELDS = {
+    "event_json": ("event", dict),
+    "article_titles_json": ("article_titles", list),
+    "music_links_json": ("music_links", list),
+    "images_json": ("images", list),
+    "script_json": ("script", dict),
+    "voice_json": ("voice", dict),
+}
+
+FIELD_MAP = {
+    "status": "status",
+    "seed": "seed",
+    "article_title": "article_title",
+    "article_body": "article_body",
+    "first_comment": "first_comment",
+    "hashtags": "hashtags",
+    "banner_image": "banner_image",
+    "video_overlay_text": "video_overlay_text",
+    "fb_hook": "fb_hook",
+    "caption": "caption",
+    "notes": "notes",
+    "scheduled_for": "scheduled_for",
+}
+JSON_IN = {
+    "article_titles": "article_titles_json",
+    "music_links": "music_links_json",
+    "images": "images_json",
+    "script": "script_json",
+    "voice": "voice_json",
+    "event": "event_json",
+}
+
 
 def now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
@@ -73,20 +107,29 @@ def connect() -> sqlite3.Connection:
 def init_db() -> None:
     with connect() as conn:
         conn.executescript(SCHEMA)
-
-
-JSON_FIELDS = {"event_json": "event", "article_titles_json": "article_titles", "music_links_json": "music_links", "video_plan_json": "video_plan"}
+        cols = {row["name"] for row in conn.execute("PRAGMA table_info(projects)")}
+        for name, ddl in ADDED_COLUMNS.items():
+            if name not in cols:
+                conn.execute(f"ALTER TABLE projects ADD COLUMN {name} {ddl}")
+        # the old "video" status is now "script" (video rendering was removed)
+        conn.execute("UPDATE projects SET status = 'script' WHERE status = 'video'")
 
 
 def row_to_project(row: sqlite3.Row) -> dict[str, Any]:
     p = dict(row)
-    for col, key in JSON_FIELDS.items():
+    for col, (key, default) in JSON_FIELDS.items():
+        if col not in p:
+            p[key] = default()
+            continue
         raw = p.pop(col, None)
         try:
-            p[key] = json.loads(raw) if raw else ({} if key == "video_plan" else [])
+            loaded = json.loads(raw) if raw else default()
         except json.JSONDecodeError:
-            p[key] = {} if key == "video_plan" else []
+            loaded = default()
+        p[key] = loaded if isinstance(loaded, type(default())) else default()
+    p.pop("video_plan_json", None)
     p["hashtags"] = p.get("hashtags") or ""
+    p["images"] = p.get("images") or []
     return p
 
 
@@ -126,29 +169,6 @@ def create_project(artist_id: str, event: dict, seed: int = 1) -> dict:
     return get_project(pid)  # type: ignore[return-value]
 
 
-FIELD_MAP = {
-    "status": "status",
-    "seed": "seed",
-    "article_title": "article_title",
-    "article_dek": "article_dek",
-    "article_body": "article_body",
-    "first_comment": "first_comment",
-    "hashtags": "hashtags",
-    "banner_image": "banner_image",
-    "video_overlay_text": "video_overlay_text",
-    "fb_hook": "fb_hook",
-    "caption": "caption",
-    "video_style": "video_style",
-    "audio_choice": "audio_choice",
-    "audio_path": "audio_path",
-    "render_path": "render_path",
-    "render_status": "render_status",
-    "notes": "notes",
-    "scheduled_for": "scheduled_for",
-}
-JSON_IN = {"article_titles": "article_titles_json", "music_links": "music_links_json", "video_plan": "video_plan_json", "event": "event_json"}
-
-
 def update_project(pid: str, patch: dict[str, Any]) -> dict | None:
     sets, params = [], []
     for key, value in patch.items():
@@ -175,14 +195,14 @@ def delete_project(pid: str) -> bool:
 
 
 def duplicate_project(pid: str) -> dict | None:
-    """Copy a project row (article, script, caption) without its rendered media."""
+    """Copy a project (article, images, script) and reset the publish state."""
     with connect() as conn:
         row = conn.execute("SELECT * FROM projects WHERE id = ?", (pid,)).fetchone()
     if not row:
         return None
     new_id = uuid.uuid4().hex[:12]
     ts = now()
-    reset = {"render_path": "", "render_status": "", "render_seconds": 0, "audio_path": "", "banner_image": "", "status": "draft"}
+    reset = {"banner_image": "", "voice_json": "{}", "status": "draft"}
     cols = [c for c in row.keys() if c not in {"id", "created_at", "updated_at"}]
     values = [reset.get(c, row[c]) for c in cols]
     with connect() as conn:
@@ -198,8 +218,9 @@ def stats() -> dict:
     with connect() as conn:
         total = conn.execute("SELECT COUNT(*) c FROM projects").fetchone()["c"]
         by_status = {r["status"]: r["c"] for r in conn.execute("SELECT status, COUNT(*) c FROM projects GROUP BY status")}
-        rendered = conn.execute("SELECT COUNT(*) c FROM projects WHERE render_path != ''").fetchone()["c"]
-    return {"total": total, "by_status": by_status, "rendered": rendered}
+        ready = conn.execute("SELECT COUNT(*) c FROM projects WHERE status IN ('ready','scheduled','published')").fetchone()["c"]
+        with_banner = conn.execute("SELECT COUNT(*) c FROM projects WHERE banner_image != ''").fetchone()["c"]
+    return {"total": total, "by_status": by_status, "ready": ready, "with_banner": with_banner}
 
 
 def add_custom_event(artist_id: str, date_str: str, title: str, kind: str = "custom", note: str = "") -> dict:

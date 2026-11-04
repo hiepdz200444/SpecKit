@@ -11,7 +11,7 @@ fi
 # shellcheck disable=SC1091
 . .venv/bin/activate
 
-if ! python -c "import fastapi, PIL, imageio_ffmpeg, numpy" >/dev/null 2>&1; then
+if ! python -c "import fastapi, PIL, edge_tts" >/dev/null 2>&1; then
   echo "→ Cài dependencies"
   pip install -q --upgrade pip
   pip install -q -r requirements.txt

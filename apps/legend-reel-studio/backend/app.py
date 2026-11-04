@@ -1,51 +1,49 @@
-"""Legends Reel Studio — API + static app."""
+"""Legends Reel Studio — API + static app (article + artist photos + text/voice)."""
 
 from __future__ import annotations
 
-import base64
-import json
+import io
 import os
+import re
 import shutil
-import threading
 import time
-import uuid
-from datetime import date, datetime
+import zipfile
+from datetime import date, datetime, timezone
 
-from fastapi import Body, FastAPI, File, HTTPException, Query, Request, UploadFile
+from fastapi import Body, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Response
 from fastapi.staticfiles import StaticFiles
-from PIL import Image, ImageOps
 
-import audio as audio_mod
 import content
 import db
+import images as images_mod
 import library
-from render import STYLES, Renderer
+import voice as voice_mod
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 APP_DIR = os.path.dirname(HERE)
 WEB_DIR = os.path.join(APP_DIR, "web")
 DATA_DIR = os.environ.get("LRS_DATA_DIR") or os.path.join(APP_DIR, "data")
-BANNER_DIR = os.path.join(DATA_DIR, "banners")
-AUDIO_DIR = os.path.join(DATA_DIR, "audio")
-RENDER_DIR = os.path.join(DATA_DIR, "renders")
-BED_PATH = os.path.join(DATA_DIR, "bed.wav")
+IMAGE_DIR = os.path.join(DATA_DIR, "images")
+VOICE_DIR = os.path.join(DATA_DIR, "voice")
+MAX_IMAGES = 60
+IMAGE_ID_RE = re.compile(r"^[a-f0-9]{8,32}$")
 
-for d in (DATA_DIR, BANNER_DIR, AUDIO_DIR, RENDER_DIR):
+for d in (DATA_DIR, IMAGE_DIR, VOICE_DIR):
     os.makedirs(d, exist_ok=True)
 
 STATUS_LABELS = {
     "draft": "Nháp",
     "article": "Đã có bài báo",
-    "video": "Đã có kịch bản",
+    "script": "Đã có text & voice",
     "ready": "Sẵn sàng đăng",
     "scheduled": "Đã lên lịch",
     "published": "Đã đăng",
 }
 
 db.init_db()
-app = FastAPI(title="Legends Reel Studio", version="1.0.0")
+app = FastAPI(title="Legends Reel Studio", version="2.0.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -54,9 +52,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-JOBS: dict[str, dict] = {}
-RENDER_LOCK = threading.Lock()
-
 
 # --------------------------------------------------------------------------- #
 # serialization helpers                                                       #
@@ -64,6 +59,7 @@ RENDER_LOCK = threading.Lock()
 def media_url(path: str) -> str:
     if not path:
         return ""
+    path = path if os.path.isabs(path) else os.path.join(DATA_DIR, path)
     path = os.path.abspath(path)
     assets = os.path.join(WEB_DIR, "assets")
     if path.startswith(DATA_DIR + os.sep):
@@ -73,15 +69,43 @@ def media_url(path: str) -> str:
     return ""
 
 
+def _images(project: dict) -> list[dict]:
+    return [images_mod.as_public(img, media_url) for img in (project.get("images") or [])]
+
+
+def _banner_url(project: dict, public_images: list[dict], artist: dict) -> str:
+    banner = project.get("banner_image") or ""
+    for img in public_images:
+        if img.get("id") == banner and img.get("file_url"):
+            return img["file_url"]
+    if banner and os.path.isabs(banner) and os.path.exists(banner):
+        return media_url(banner)
+    return f"/assets/{artist.get('cover', 'bg-stage.jpg')}"
+
+
 def serialize_project(p: dict) -> dict:
     artist = library.get_artist(p["artist_id"]) or {}
     out = dict(p)
     out["artist"] = artist
-    out["banner_url"] = media_url(p.get("banner_image", "")) or f"/assets/{artist.get('cover', 'bg-stage.jpg')}"
-    out["render_url"] = media_url(p.get("render_path", ""))
-    out["audio_url"] = media_url(p.get("audio_path", ""))
-    out["poster_url"] = media_url(os.path.splitext(p.get("render_path", ""))[0] + ".jpg") if p.get("render_path") else ""
-    out["checks"] = content.engagement_checks(p)
+    public_images = _images(p)
+    banner = _banner_url(p, public_images, artist)
+    for img in public_images:
+        img["is_banner"] = bool(banner) and img.get("file_url") == banner
+    out["images"] = public_images
+    out["image_count"] = len(public_images)
+    out["image_target"] = images_mod.TARGET_IMAGES
+    out["banner_url"] = banner
+    voice = dict(p.get("voice") or {})
+    if voice.get("file"):
+        voice["url"] = media_url(voice["file"])
+    out["voice"] = voice
+    stats = content.article_stats(p.get("article_body") or "")
+    out["article_words"] = stats["words"]
+    out["article_range"] = [stats["min"], stats["max"]]
+    out["article_in_range"] = stats["in_range"]
+    out["overlay_words"] = content.word_count(p.get("video_overlay_text") or "")
+    out["overlay_ok"] = content.OVERLAY_MIN_WORDS <= out["overlay_words"] <= content.OVERLAY_MAX_WORDS
+    out["checks"] = content.engagement_checks(out)
     out["status_label"] = STATUS_LABELS.get(p.get("status", "draft"), p.get("status", ""))
     return out
 
@@ -89,31 +113,14 @@ def serialize_project(p: dict) -> dict:
 def get_or_404(pid: str) -> dict:
     project = db.get_project(pid)
     if not project:
-        raise HTTPException(404, "Project không tồn tại")
+        raise HTTPException(404, "Dự án không tồn tại")
     return project
 
 
-def ensure_bed() -> str:
-    if not os.path.exists(BED_PATH):
-        audio_mod.write_bed(BED_PATH, 30.0)
-    return BED_PATH
-
-
-def save_banner(pid: str, raw: bytes) -> str:
-    path = os.path.join(BANNER_DIR, f"{pid}.jpg")
-    tmp = path + ".tmp"
-    with open(tmp, "wb") as f:
-        f.write(raw)
-    img = Image.open(tmp).convert("RGB")
-    # portrait-first: cover-crop to 3:4 max, keep tall sources tall
-    img = ImageOps.exif_transpose(img)
-    max_w, max_h = 1400, 2400
-    if img.width > max_w or img.height > max_h:
-        ratio = min(max_w / img.width, max_h / img.height)
-        img = img.resize((int(img.width * ratio), int(img.height * ratio)), Image.LANCZOS)
-    img.save(path, quality=90, optimize=True)
-    os.remove(tmp)
-    return path
+def _remove_media(pid: str) -> None:
+    for folder in (os.path.join(IMAGE_DIR, pid), os.path.join(VOICE_DIR, pid)):
+        if os.path.isdir(folder):
+            shutil.rmtree(folder, ignore_errors=True)
 
 
 # --------------------------------------------------------------------------- #
@@ -128,8 +135,14 @@ def bootstrap(day: str = Query(default="")):
         "artists": library.artists_index(),
         "stats": db.stats(),
         "status_labels": STATUS_LABELS,
-        "styles": {k: {"label": v["label"], "accent": "#%02x%02x%02x" % v["accent"]} for k, v in STYLES.items()},
         "upcoming": library.upcoming_summary(ref, 21),
+        "limits": {
+            "article": [content.ARTICLE_MIN_WORDS, content.ARTICLE_MAX_WORDS],
+            "overlay": [content.OVERLAY_MIN_WORDS, content.OVERLAY_MAX_WORDS],
+            "images": images_mod.TARGET_IMAGES,
+        },
+        "voices": voice_mod.NEURAL_VOICES,
+        "tts_engines": voice_mod.engines(),
     }
 
 
@@ -202,9 +215,9 @@ def project_detail(pid: str):
 def patch_project(pid: str, patch: dict = Body(...)):
     get_or_404(pid)
     allowed = {
-        "status", "article_title", "article_dek", "article_body", "first_comment", "hashtags",
-        "video_overlay_text", "fb_hook", "caption", "video_style", "audio_choice",
-        "notes", "scheduled_for", "article_titles", "music_links", "video_plan", "seed",
+        "status", "article_title", "article_body", "first_comment", "hashtags",
+        "video_overlay_text", "fb_hook", "caption", "notes", "scheduled_for",
+        "article_titles", "music_links", "script", "seed",
     }
     clean = {k: v for k, v in patch.items() if k in allowed}
     updated = db.update_project(pid, clean)
@@ -214,13 +227,7 @@ def patch_project(pid: str, patch: dict = Body(...)):
 @app.delete("/api/projects/{pid}")
 def delete_project(pid: str):
     get_or_404(pid)
-    for suffix in (".mp4", ".jpg"):
-        f = os.path.join(RENDER_DIR, pid + suffix)
-        if os.path.exists(f):
-            os.remove(f)
-    b = os.path.join(BANNER_DIR, pid + ".jpg")
-    if os.path.exists(b):
-        os.remove(b)
+    _remove_media(pid)
     db.delete_project(pid)
     return {"ok": True}
 
@@ -229,12 +236,19 @@ def delete_project(pid: str):
 def duplicate_project(pid: str):
     src = get_or_404(pid)
     copy = db.duplicate_project(pid)
-    # keep the artwork with the copy so deleting the original cannot break it
+    assert copy is not None
+    # copy the images folder too, so deleting the original cannot break the copy
+    src_dir = os.path.join(IMAGE_DIR, pid)
+    if os.path.isdir(src_dir):
+        shutil.copytree(src_dir, os.path.join(IMAGE_DIR, copy["id"]), dirs_exist_ok=True)
+    new_images = []
+    for img in src.get("images") or []:
+        item = dict(img)
+        if item.get("file"):
+            item["file"] = item["file"].replace(f"images/{pid}/", f"images/{copy['id']}/")
+        new_images.append(item)
     banner = src.get("banner_image") or ""
-    if banner and os.path.exists(banner):
-        new_banner = os.path.join(BANNER_DIR, f"{copy['id']}.jpg")
-        shutil.copyfile(banner, new_banner)
-        copy = db.update_project(copy["id"], {"banner_image": new_banner})
+    copy = db.update_project(copy["id"], {"images": new_images, "banner_image": banner, "voice": {}})
     return serialize_project(copy)
 
 
@@ -254,7 +268,6 @@ def apply_generation(project: dict, section: str = "all", seed: int | None = Non
             {
                 "article_title": article["title"],
                 "article_titles": article["title_variants"],
-                "article_dek": article["dek"],
                 "article_body": article["body"],
                 "first_comment": article["first_comment"],
                 "hashtags": " ".join(article["hashtags"]),
@@ -264,25 +277,23 @@ def apply_generation(project: dict, section: str = "all", seed: int | None = Non
         if project.get("status") in (None, "", "draft"):
             patch["status"] = "article"
 
-    if section in ("video", "all"):
-        plan = content.video_for(artist, event, article, seed)
+    if section in ("script", "all"):
+        plan = content.script_for(artist, event, article, seed)
         if overlay_text.strip():
             plan["overlay_text"] = overlay_text.strip()
             plan["overlay_words"] = content.word_count(overlay_text)
-            plan["scenes"][0]["text"] = overlay_text.strip()
+            plan["overlay_ok"] = content.OVERLAY_MIN_WORDS <= plan["overlay_words"] <= content.OVERLAY_MAX_WORDS
         patch.update(
             {
-                "video_plan": plan,
+                "script": plan,
                 "video_overlay_text": plan["overlay_text"],
                 "fb_hook": plan["fb_hook"],
                 "caption": plan["caption"] + "\n\n" + " ".join(plan.get("hashtags") or []),
-                "audio_choice": project.get("audio_choice") or "bed",
+                "hashtags": " ".join(plan.get("hashtags") or []),
             }
         )
-        if patch.get("status") == "article":
-            patch["status"] = "video"
-        elif project.get("status") in ("draft", "article", ""):
-            patch["status"] = "article" if section == "video" and not article else "video"
+        if (project.get("status") or "draft") in ("draft", "article"):
+            patch["status"] = "script"
 
     return db.update_project(project["id"], patch)
 
@@ -291,6 +302,8 @@ def apply_generation(project: dict, section: str = "all", seed: int | None = Non
 def generate(pid: str, payload: dict = Body(default={})):
     project = get_or_404(pid)
     section = payload.get("section", "all")
+    if section not in ("article", "script", "all"):
+        raise HTTPException(400, "section phải là article, script hoặc all")
     seed = payload.get("seed")
     seed = int(seed) if seed is not None else int(time.time() * 1000) % 99991
     overlay = payload.get("overlay_text", "")
@@ -311,149 +324,248 @@ def set_overlay(pid: str, payload: dict = Body(...)):
     project = get_or_404(pid)
     text = (payload.get("text") or "").strip()
     words = content.word_count(text)
-    plan = project.get("video_plan") or {}
-    if plan.get("scenes"):
-        plan["scenes"][0]["text"] = text
-    plan["overlay_text"] = text
-    plan["overlay_words"] = words
-    updated = db.update_project(pid, {"video_overlay_text": text, "video_plan": plan})
-    return {"project": serialize_project(updated), "words": words, "ok": 9 <= words <= 15}
-
-
-# --------------------------------------------------------------------------- #
-# uploads                                                                     #
-# --------------------------------------------------------------------------- #
-@app.post("/api/projects/{pid}/banner")
-async def upload_banner(pid: str, request: Request):
-    """Accept either multipart/form-data (file) or JSON {"data_url": "data:image/..."}."""
-    get_or_404(pid)
-    raw = b""
-    content_type = request.headers.get("content-type", "")
-    if content_type.startswith("multipart/form-data"):
-        form = await request.form()
-        file = form.get("file")
-        if file is not None:
-            raw = await file.read()
-    else:
-        payload = await request.json()
-        if payload.get("data_url"):
-            raw = base64.b64decode(payload["data_url"].split(",", 1)[-1])
-        elif payload.get("url"):
-            raise HTTPException(400, "Server không tải được URL trực tiếp, hãy gửi ảnh dạng data_url")
-    if not raw:
-        raise HTTPException(400, "Thiếu ảnh")
-    path = save_banner(pid, raw)
-    updated = db.update_project(pid, {"banner_image": path})
-    return serialize_project(updated)
-
-
-@app.post("/api/projects/{pid}/audio")
-async def upload_audio(pid: str, file: UploadFile = File(...)):
-    get_or_404(pid)
-    ext = os.path.splitext(file.filename or "track.mp3")[1].lower() or ".mp3"
-    if ext not in {".mp3", ".m4a", ".wav", ".aac", ".ogg", ".flac"}:
-        raise HTTPException(400, "Định dạng audio không hỗ trợ")
-    path = os.path.join(AUDIO_DIR, f"{pid}{ext}")
-    with open(path, "wb") as f:
-        shutil.copyfileobj(file.file, f)
-    updated = db.update_project(pid, {"audio_path": path, "audio_choice": "upload"})
-    return serialize_project(updated)
-
-
-@app.post("/api/projects/{pid}/audio-choice")
-def audio_choice(pid: str, payload: dict = Body(...)):
-    get_or_404(pid)
-    choice = payload.get("choice", "bed")
-    updated = db.update_project(pid, {"audio_choice": choice})
-    return serialize_project(updated)
-
-
-# --------------------------------------------------------------------------- #
-# rendering                                                                   #
-# --------------------------------------------------------------------------- #
-def _run_render(job_id: str, pid: str) -> None:
-    job = JOBS[job_id]
-    project = db.get_project(pid)
-    artist = library.get_artist(project["artist_id"])
-    style = project.get("video_style") or "noir"
-    if not (project.get("video_plan") or {}).get("scenes"):
-        project = apply_generation(project, section="video", seed=project.get("seed", 1))
-
-    audio_path = ""
-    choice = project.get("audio_choice") or "bed"
-    if choice == "upload" and project.get("audio_path") and os.path.exists(project["audio_path"]):
-        audio_path = project["audio_path"]
-    elif choice != "none":
-        audio_path = ensure_bed()
-
-    out = os.path.join(RENDER_DIR, f"{pid}.mp4")
-    poster = os.path.join(RENDER_DIR, f"{pid}.jpg")
-
-    def progress(frac: float, frame: int, total: int) -> None:
-        job.update(
-            {
-                "progress": round(frac * 100, 1),
-                "frame": frame,
-                "total_frames": total,
-                "message": f"Đang render frame {frame}/{total}",
-            }
-        )
-
-    try:
-        job.update({"status": "running", "progress": 0, "message": "Đang chuẩn bị khung hình"})
-        t0 = time.time()
-        renderer = Renderer(project, artist, style)
-        result = renderer.render(out, audio_path=audio_path, poster_path=poster, progress=progress)
-        seconds = time.time() - t0
-        db.update_project(pid, {"render_path": out, "render_status": "done", "render_seconds": seconds, "status": "ready"})
-        job.update(
-            {
-                "status": "done",
-                "progress": 100,
-                "message": "Xong",
-                "path": out,
-                "url": media_url(out),
-                "poster": media_url(poster),
-                "seconds": round(seconds, 1),
-                "size_mb": round(os.path.getsize(out) / 1024 / 1024, 2),
-                "frames": result["frames"],
-            }
-        )
-    except Exception as exc:  # noqa: BLE001
-        db.update_project(pid, {"render_status": "error"})
-        job.update({"status": "error", "message": str(exc)[:800]})
-    finally:
-        RENDER_LOCK.release()
-
-
-@app.post("/api/projects/{pid}/render")
-def start_render(pid: str, payload: dict = Body(default={})):
-    project = get_or_404(pid)
-    if not RENDER_LOCK.acquire(blocking=False):
-        raise HTTPException(429, "Đang có một video khác được render, thử lại sau")
-    job_id = uuid.uuid4().hex[:10]
-    JOBS[job_id] = {
-        "id": job_id,
-        "project_id": pid,
-        "status": "queued",
-        "progress": 0,
-        "message": "Đang xếp hàng",
-        "started": datetime.utcnow().isoformat(),
+    script = dict(project.get("script") or {})
+    script["overlay_text"] = text
+    script["overlay_words"] = words
+    script["overlay_ok"] = content.OVERLAY_MIN_WORDS <= words <= content.OVERLAY_MAX_WORDS
+    updated = db.update_project(pid, {"video_overlay_text": text, "script": script})
+    return {
+        "project": serialize_project(updated),
+        "words": words,
+        "ok": content.OVERLAY_MIN_WORDS <= words <= content.OVERLAY_MAX_WORDS,
+        "range": [content.OVERLAY_MIN_WORDS, content.OVERLAY_MAX_WORDS],
     }
-    style = payload.get("style")
-    if style and style in STYLES:
-        db.update_project(pid, {"video_style": style})
-    thread = threading.Thread(target=_run_render, args=(job_id, pid), daemon=True)
-    thread.start()
-    return {"job": JOBS[job_id], "project_id": pid}
 
 
-@app.get("/api/jobs/{job_id}")
-def job_status(job_id: str):
-    job = JOBS.get(job_id)
-    if not job:
-        raise HTTPException(404, "Job không tồn tại")
-    return job
+# --------------------------------------------------------------------------- #
+# artist images                                                               #
+# --------------------------------------------------------------------------- #
+def _store_images(pid: str, project: dict, incoming: list[dict]) -> tuple[list[dict], list[str]]:
+    current = list(project.get("images") or [])
+    known = {img.get("id") for img in current}
+    known_urls = {img.get("url") for img in current if img.get("url")}
+    added, errors = [], []
+    for record in incoming:
+        if len(current) >= MAX_IMAGES:
+            errors.append(f"Dự án đã đạt giới hạn {MAX_IMAGES} ảnh")
+            break
+        item = dict(record)
+        filename = item.pop("filename", "") or "image.jpg"
+        raw = item.pop("_raw", b"")
+        url = item.get("url") or ""
+        if url and url in known_urls:
+            continue
+        try:
+            if raw and not url:
+                stored = images_mod.import_upload(DATA_DIR, pid, raw, filename)
+            elif raw:
+                stored = images_mod.save_image(DATA_DIR, pid, raw, item)
+            else:
+                stored = images_mod.import_from_url(DATA_DIR, pid, url, item)
+        except images_mod.ImageFetchError as exc:
+            errors.append(f"{url or filename}: {exc}")
+            continue
+        except Exception as exc:  # noqa: BLE001 - never break a batch on one bad file
+            errors.append(f"{url or filename}: {exc}")
+            continue
+        if stored.get("id") in known:
+            # same file already in the project (e.g. the same URL pasted twice)
+            continue
+        current.append(stored)
+        known.add(stored["id"])
+        if stored.get("url"):
+            known_urls.add(stored["url"])
+        added.append(stored)
+    if added:
+        db.update_project(pid, {"images": current})
+        project["images"] = current
+        if not project.get("banner_image"):
+            db.update_project(pid, {"banner_image": added[0]["id"]})
+            project["banner_image"] = added[0]["id"]
+    return added, errors
+
+
+@app.get("/api/projects/{pid}/images")
+def list_images(pid: str):
+    project = get_or_404(pid)
+    return {
+        "images": _images(project),
+        "target": images_mod.TARGET_IMAGES,
+        "banner": project.get("banner_image", ""),
+    }
+
+
+@app.get("/api/projects/{pid}/images/suggest")
+def suggest_images(pid: str, limit: int = Query(default=20, ge=1, le=40)):
+    project = get_or_404(pid)
+    artist = library.get_artist(project["artist_id"]) or {}
+    try:
+        data = images_mod.suggest_for_artist(artist, limit=limit)
+    except images_mod.ImageFetchError as exc:
+        raise HTTPException(502, str(exc)) from exc
+    existing_urls = {img.get("url") for img in project.get("images") or [] if img.get("url")}
+    data["images"] = [img for img in data["images"] if img["url"] not in existing_urls]
+    data["existing"] = len(project.get("images") or [])
+    return data
+
+
+@app.post("/api/projects/{pid}/images")
+def add_images(pid: str, payload: dict = Body(...)):
+    project = get_or_404(pid)
+    incoming: list[dict] = []
+    if payload.get("url"):
+        incoming.append({"url": payload["url"], **_meta_from(payload)})
+    for url in payload.get("urls") or []:
+        if isinstance(url, str) and url.strip():
+            incoming.append({"url": url.strip(), **_meta_from(payload, drop_url=True)})
+    for item in payload.get("images") or []:
+        if isinstance(item, dict) and item.get("url"):
+            incoming.append({k: v for k, v in item.items() if k != "file_url"})
+    if not incoming:
+        raise HTTPException(400, "Cần ít nhất một link ảnh (url hoặc urls)")
+    added, errors = _store_images(pid, project, incoming)
+    return {
+        "project": serialize_project(get_or_404(pid)),
+        "added": len(added),
+        "errors": errors,
+    }
+
+
+def _meta_from(payload: dict, drop_url: bool = False) -> dict:
+    keep = ("source", "title", "page_url", "license", "license_url", "attribution", "description")
+    meta = {k: payload[k] for k in keep if payload.get(k)}
+    if drop_url:
+        meta.pop("url", None)
+    return meta
+
+
+@app.post("/api/projects/{pid}/images/upload")
+async def upload_images(pid: str, request: Request):
+    project = get_or_404(pid)
+    ctype = request.headers.get("content-type", "")
+    if not ctype.startswith("multipart/form-data"):
+        raise HTTPException(400, "Cần gửi multipart/form-data")
+    form = await request.form()
+    incoming: list[dict] = []
+    for _, value in form.multi_items():
+        if hasattr(value, "read"):
+            raw = await value.read()
+            if not raw:
+                continue
+            name = getattr(value, "filename", "") or "image.jpg"
+            incoming.append({"_raw": raw, "filename": name, "source": "upload"})
+    if not incoming:
+        raise HTTPException(400, "Thiếu file ảnh")
+    added, errors = _store_images(pid, project, incoming)
+    return {"project": serialize_project(get_or_404(pid)), "added": len(added), "errors": errors}
+
+
+def _find_image(project: dict, image_id: str) -> dict:
+    if not IMAGE_ID_RE.match(image_id or ""):
+        raise HTTPException(400, "image_id không hợp lệ")
+    for img in project.get("images") or []:
+        if img.get("id") == image_id:
+            return img
+    raise HTTPException(404, "Ảnh không tồn tại trong dự án")
+
+
+@app.patch("/api/projects/{pid}/images/{image_id}")
+def patch_image(pid: str, image_id: str, payload: dict = Body(...)):
+    project = get_or_404(pid)
+    _find_image(project, image_id)
+    if payload.get("is_banner"):
+        project = db.update_project(pid, {"banner_image": image_id})
+    return {"project": serialize_project(project)}
+
+
+@app.delete("/api/projects/{pid}/images/{image_id}")
+def delete_image(pid: str, image_id: str):
+    project = get_or_404(pid)
+    image = _find_image(project, image_id)
+    remaining = [img for img in project.get("images") or [] if img.get("id") != image_id]
+    patch = {"images": remaining}
+    if project.get("banner_image") == image_id:
+        patch["banner_image"] = remaining[0]["id"] if remaining else ""
+    db.update_project(pid, patch)
+    path = os.path.join(DATA_DIR, image.get("file", ""))
+    if image.get("file") and os.path.exists(path):
+        os.remove(path)
+    return {"project": serialize_project(get_or_404(pid)), "ok": True}
+
+
+@app.get("/api/projects/{pid}/images/{image_id}/download")
+def download_image(pid: str, image_id: str):
+    project = get_or_404(pid)
+    image = _find_image(project, image_id)
+    path = os.path.join(DATA_DIR, image.get("file", ""))
+    if not os.path.exists(path):
+        raise HTTPException(404, "File ảnh không còn trên đĩa")
+    artist = library.get_artist(project["artist_id"]) or {}
+    slug = re.sub(r"[^a-z0-9]+", "-", (artist.get("id") or "artist").lower()).strip("-")
+    index = (project.get("images") or []).index(image) + 1
+    return FileResponse(path, media_type="image/jpeg", filename=f"{slug}-{index:02d}.jpg")
+
+
+@app.get("/api/projects/{pid}/images.zip")
+def download_images_zip(pid: str):
+    project = get_or_404(pid)
+    artist = library.get_artist(project["artist_id"]) or {}
+    slug = re.sub(r"[^a-z0-9]+", "-", (artist.get("id") or "artist").lower()).strip("-")
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        for index, image in enumerate(project.get("images") or [], 1):
+            path = os.path.join(DATA_DIR, image.get("file", ""))
+            if image.get("file") and os.path.exists(path):
+                archive.write(path, arcname=f"{slug}-{index:02d}.jpg")
+        archive.writestr("ATTRIBUTION.txt", images_mod.attribution_text(project.get("images") or [], artist.get("name", "")))
+    buffer.seek(0)
+    headers = {"Content-Disposition": f'attachment; filename="{slug}-images.zip"'}
+    return Response(buffer.getvalue(), media_type="application/zip", headers=headers)
+
+
+# --------------------------------------------------------------------------- #
+# voice                                                                       #
+# --------------------------------------------------------------------------- #
+@app.get("/api/voices")
+def voices():
+    return {"voices": voice_mod.NEURAL_VOICES, "engines": voice_mod.engines(), "default": voice_mod.DEFAULT_VOICE}
+
+
+@app.post("/api/projects/{pid}/voice")
+def make_voice(pid: str, payload: dict = Body(...)):
+    project = get_or_404(pid)
+    text = (payload.get("text") or "").strip()
+    voice = payload.get("voice") or voice_mod.DEFAULT_VOICE
+    if not text:
+        text = project.get("video_overlay_text") or ""
+    try:
+        result = voice_mod.synthesize(DATA_DIR, pid, text, voice)
+    except voice_mod.VoiceError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    record = {
+        "file": result["file"],
+        "engine": result["engine"],
+        "voice": result["voice"],
+        "ext": result["ext"],
+        "bytes": result["bytes"],
+        "duration": result["duration"],
+        "text": result["text"],
+        "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+    }
+    updated = serialize_project(db.update_project(pid, {"voice": record}))
+    return {"project": updated, "voice": updated["voice"]}
+
+
+@app.delete("/api/projects/{pid}/voice")
+def delete_voice(pid: str):
+    project = get_or_404(pid)
+    for stale in (project.get("voice") or {}).get("file"),:
+        if stale:
+            path = os.path.join(DATA_DIR, stale)
+            if os.path.exists(path):
+                os.remove(path)
+    updated = db.update_project(pid, {"voice": {}})
+    return {"project": serialize_project(updated), "ok": True}
 
 
 # --------------------------------------------------------------------------- #
@@ -467,20 +579,16 @@ def export_project(pid: str, fmt: str = "md"):
     payload = content.build_package(project, artist, event)
     if fmt == "json":
         return JSONResponse(payload)
-    md = payload["article_markdown"]
-    caption = (project.get("caption") or "").strip()
-    md += "\n\n---\n\n## Facebook caption\n\n" + caption
-    md += "\n\n## Hashtags\n\n" + (project.get("hashtags") or "")
-    return PlainTextResponse(md)
+    return PlainTextResponse(payload["article_markdown"])
 
 
 @app.get("/api/projects/{pid}/cover")
 def cover(pid: str):
-    project = get_or_404(pid)
-    artist = library.get_artist(project["artist_id"])
-    path = project.get("banner_image")
-    if not path or not os.path.exists(path):
-        path = os.path.join(WEB_DIR, "assets", artist.get("cover") or "bg-stage.jpg")
+    project = serialize_project(get_or_404(pid))
+    url = project["banner_url"]
+    path = os.path.join(DATA_DIR, url[len("/media/"):]) if url.startswith("/media/") else os.path.join(WEB_DIR, url.lstrip("/"))
+    if not os.path.exists(path):
+        raise HTTPException(404, "Chưa có ảnh bìa")
     return FileResponse(path)
 
 
