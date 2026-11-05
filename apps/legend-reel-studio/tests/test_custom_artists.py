@@ -28,8 +28,21 @@ def test_name_only_creates_a_700_900_word_project():
     assert 9 <= project["overlay_words"] <= 15
     assert project["status"] == "script"
     assert project["voice"]["file"] if project.get("voice") else True
-    # no invented song titles when the operator did not supply any
-    assert project["music_links"] == []
+    # no invented song titles: only search links with neutral labels
+    links = project["music_links"]
+    assert len(links) == 3
+    assert [l["title"] for l in links] == ["Greatest hits", "Live performance", "Interview"]
+    for link in links:
+        assert link["youtube"].startswith("https://www.youtube.com/results?search_query=")
+        assert "Michael+Jackson" in link["youtube"]
+
+
+def test_name_only_music_links_are_searches_not_video_ids():
+    res = _create("Charlie Chaplin")
+    assert res.status_code == 200
+    for link in res.json()["music_links"]:
+        assert "watch?v=" not in link["youtube"]
+        assert "Charlie" in link["youtube"]
 
 
 def test_profile_fields_flow_into_the_copy():

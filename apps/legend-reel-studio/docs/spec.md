@@ -148,7 +148,7 @@ Người vận hành muốn viết về một người không có trong thư vi�
 
 1. **Given** chỉ có tên, **When** tạo, **Then** bài vẫn 700–900 từ và không in số liệu bịa (không "0 years", không tuổi sai).
 2. **Given** có thêm chi tiết, **When** tạo, **Then** bài nhắc đúng nghệ danh/thể loại/quê quán/bài hát/ghi chú đã nhập.
-3. **Given** bài hát không có mã video, **When** xem link nhạc, **Then** link là YouTube *search* (không phải video id bịa).
+3. **Given** bài hát không có mã video hoặc chưa nhập bài nào, **When** xem link nhạc, **Then** link là YouTube *search* (không phải video id bịa); profile chỉ có tên vẫn nhận 3 link tìm kiếm để có nhạc phát ngay.
 4. **Given** giới tính được chọn, **When** sinh bài, **Then** đại từ đúng (he/his hoặc she/her).
 5. **Given** tên trống, **When** bấm tạo, **Then** API trả 400 với thông báo tiếng Việt.
 6. **Given** profile đang có dự án, **When** xoá profile, **Then** API chặn bằng 400.

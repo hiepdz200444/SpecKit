@@ -73,7 +73,7 @@
 - [x] T050 `POST /api/rivals/{id}/remake`: tạo dự án mới cùng pipeline (nghệ sĩ thư viện, tên mới, hoặc không chọn), gắn `project["remake"]`, brief vào `article.md` + `bundle.zip`, reel chuyển “đang làm lại”
 - [x] T051 UI “Reels đối thủ”: nhập hàng loạt, bảng xếp hạng có điểm + nhãn, bộ lọc/sắp xếp, brief mở tại chỗ, nút “Làm lại” mở hộp thoại chọn nghệ sĩ; banner “Làm lại từ reel đối thủ” ở đầu trang Studio
 - [x] T052 “Tạo bài viết bằng tên nhân vật”: `backend/profiles.py` + `custom_artists` + `GET/POST /api/artists/custom`, `PATCH/DELETE /api/artists/custom/{id}`, `POST /api/projects/custom`; panel ở Khám phá (tên + dịp + ngày, mở rộng để nhập chi tiết); link nhạc dạng tìm kiếm, giữ đúng đại từ, không in “0 years”
-- [x] T053 CSS cho `rival-*`/`tier-*`/`remake-card` (desktop + mobile); bump `APP_VERSION` 2.2.0 + `features` (`rivals-ranking`, `rivals-remake`, `article-by-name`); cập nhật README mục 5–6, `docs/spec.md` FR-026…FR-030, jsdom smoke lên 69 check (76 pytest)
+- [x] T053 CSS cho `rival-*`/`tier-*`/`remake-card` (desktop + mobile); bump `APP_VERSION` 2.2.0 + `features` (`rivals-ranking`, `rivals-remake`, `article-by-name`); cập nhật README mục 5–6, `docs/spec.md` FR-026…FR-030, jsdom smoke lên 69 check (77 pytest)
 
 ## Backlog (chưa làm)
 

@@ -107,10 +107,16 @@ def _song_year(song: dict) -> str:
 
 
 def song_links(profile: dict) -> list[dict]:
-    """Search links instead of ids: they never rot when a video is taken down."""
+    """Search links instead of ids: they never rot when a video is taken down.
+
+    A name-only profile has no songs yet, so it still gets three search links
+    (greatest hits / live / interviews) — the operator always has something to
+    play, and the article never links to an invented video id.
+    """
+    name = str(profile.get("name") or "").strip()
     out = []
     for song in profile.get("songs") or []:
-        query = quote_plus(f"{profile.get('name', '')} {song['title']}".strip())
+        query = quote_plus(f"{name} {song['title']}".strip())
         out.append(
             {
                 "title": song["title"],
@@ -119,6 +125,20 @@ def song_links(profile: dict) -> list[dict]:
                 "note": "",
             }
         )
+    if not out and name:
+        for label, suffix, note in (
+            ("Greatest hits", "greatest hits", "Playlist tìm kiếm — chọn bản bạn có quyền dùng"),
+            ("Live performance", "live performance", "Bản live để lấy đoạn cao trào cho reel"),
+            ("Interview", "interview", "Trích lời cho hook / caption"),
+        ):
+            out.append(
+                {
+                    "title": label,
+                    "year": "",
+                    "youtube": f"https://www.youtube.com/results?search_query={quote_plus(f'{name} {suffix}')}",
+                    "note": note,
+                }
+            )
     return out
 
 

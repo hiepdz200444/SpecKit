@@ -175,7 +175,7 @@ Mục **Reels đối thủ** (sidebar) để bạn ghi lại những reel cùng 
 
 - Không nhập gì thêm: studio sinh profile tối thiểu từ đúng cái tên, bài vẫn **700–900 từ**, vẫn có tiêu đề, chữ trên video 9–15 từ, hook, caption, hashtag, comment pin và voice script.
 - Muốn bài sát thật hơn, mở “Thêm chi tiết”: nghệ danh, thể loại, giai đoạn, quê quán, năm sinh/mất, giọng (he/she), link nguồn Wikipedia, danh sách bài hát `Tên | năm`, và các ghi chú/sự thật.
-- **Không tự bịa**: studio chỉ dùng đúng những gì bạn nhập cho phần profile. Bài hát không có mã video thì link nhạc là link *tìm kiếm* YouTube (không chết link).
+- **Không tự bịa**: studio chỉ dùng đúng những gì bạn nhập cho phần profile. Bài hát không có mã video thì link nhạc là link *tìm kiếm* YouTube (không chết link); chưa nhập bài nào thì vẫn có 3 link tìm kiếm (greatest hits / live / interview) để bạn có nhạc phát ngay.
 - Nhân vật được lưu lại thành profile riêng: gõ lại đúng tên đó lần sau sẽ dùng lại profile (không tạo trùng), sửa/xoá được qua `/api/artists/custom`; profile đang có dự án thì không xoá được.
 - Bài viết này dùng lại toàn bộ phần sau: ảnh, text & voice, kiểm tra, xuất `.md` / `bundle.zip`.
 
