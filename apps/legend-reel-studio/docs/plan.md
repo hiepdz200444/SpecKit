@@ -139,7 +139,13 @@ GET    /api/rivals?q=&platform=&fmt=&status=&sort=&min_score=&only_unused=
 POST   /api/rivals                          {lines?} | {items?} | {url, ...} → {reels, added, errors}
 PATCH/DELETE /api/rivals/{id}
 POST   /api/rivals/{id}/remake              {artist_id?|artist_name?, event?, seed?, generate?} → {project, reel}
+POST   /api/rivals/scan-page                {page_url, only_viral?, min_score?, limit?}
+                                            → {status: ok|blocked|empty|error, message, scanned, added,
+                                               skipped, filtered_out, attempts[], needs_session, session, reels[]}
 POST   /api/rivals/from-page                {page_url, posts?|html?|items?, only_viral?, min_score?} → {reels, added, skipped, filtered_out}
+GET    /api/rivals/session                  → {saved, cookies[], has_xs, saved_at, source}
+POST   /api/rivals/session                  {cookie} → trạng thái đã lưu (data/fb_session.json, 600)
+DELETE /api/rivals/session                  → xoá cookie phiên
 GET    /api/rivals/pages                    → [{page, count}]
 GET    /api/voices
 POST   /api/projects/{id}/voice             {text, voice}
@@ -196,6 +202,16 @@ POST /api/rivals/{id}/remake → artist (library | custom | mới từ tên | kh
 ```text
 web/assets/fb-extract.js  (chạy trong Console của trang Facebook người dùng mở)
   → đọc div[role="article"], lấy hook/url/thời gian + số trong aria-label & text
+  → POST /api/rivals/scan-page {page_url}                      (đường chính: chỉ cần link)
+       fb_fetch.page_variants()  → /<page>/reels/ · /<page>/videos/ · /<page>
+                                 (profile.php?id=…&sk=reels|videos; link một bài thì đọc đúng bài đó)
+       fb_fetch.plan_attempts()  → [cookie phiên nếu có] → chrome → googlebot → facebookexternalhit
+       fb_fetch._http_get()      → httpx (fallback urllib), UA + Accept-Language en-US, ≤6 MB, 12 s/lần, ≤30 s tổng
+       fb_fetch.extract_posts()  → JSON nhúng (video_id, play_count, reaction_count{count},
+                                   comment_count{count}, share_count{count}, creation_time, permalink_url)
+                                   + khối role="article" + og:* → gộp, khử trùng theo id bài
+       fb_fetch.looks_blocked()  → login_form / "log into facebook" / /login?next= / 401·403 → status=blocked
+     blocked → UI hiện attempts + ô dán cookie phiên một lần → POST /api/rivals/session → quét lại
   → POST /api/rivals/from-page {page_url, posts}   (dự phòng: copy JSON, dán tay)
     hoặc dán HTML đã lưu (Ctrl+S) → posts_from_html()
 

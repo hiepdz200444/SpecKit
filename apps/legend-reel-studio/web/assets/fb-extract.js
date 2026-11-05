@@ -1,11 +1,17 @@
-/* Legends Studio — bộ lấy bài từ page Facebook đối thủ.
+/* Legends Studio — bộ lấy bài từ page Facebook đối thủ (ĐƯỜNG DỰ PHÒNG).
+ *
+ * Từ v2.4.0, studio tự đọc page ở phía máy chủ: bạn chỉ cần dán link page và
+ * bấm "Tìm reels nổi". File này chỉ dùng khi Facebook chặn máy chủ (đòi đăng
+ * nhập) và bạn không muốn dán cookie phiên.
  *
  * CÁCH DÙNG (trên máy bạn, trình duyệt đang đăng nhập Facebook):
  *   1. Mở page đối thủ: https://www.facebook.com/<ten-page>
  *   2. Cuộn xuống vài lần để Facebook tải thêm bài (mỗi lần cuộn ~3-5 bài).
- *   3. Bấm F12 → tab Console → dán toàn bộ file này → Enter.
+ *   3. Mở Console (F12 → Console). Facebook có thể chặn dán mã lần đầu: gõ
+ *      "allow pasting" rồi Enter, sau đó dán toàn bộ file này → Enter.
  *   4. Studio tự nhận bài (nếu mở cùng máy); nếu không, JSON đã được copy —
- *      quay lại studio, tab "Từ link page Facebook", dán vào ô JSON rồi bấm Nhập.
+ *      quay lại studio, mục "Facebook chặn hoặc bạn muốn tự dán số liệu",
+ *      dán JSON rồi bấm Nhập.
  *
  * Script chỉ ĐỌC trang bạn đang xem (không đăng nhập hộ, không gọi API ẩn,
  * không gửi dữ liệu đi đâu ngoài máy chủ studio của bạn).

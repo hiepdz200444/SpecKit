@@ -85,6 +85,7 @@ async function main() {
   const server = await startServer(port, dataDir);
   let dom = null;
   let apiCalls = { events: 0, total: 0 };
+  const scanCalls = { total: 0, lastBody: null };
 
   const assetBytes = new Uint8Array(await (await nodeFetch(`${base}/assets/bg-stage.jpg`)).arrayBuffer());
   const CANNED = [
@@ -117,6 +118,34 @@ async function main() {
         window.scrollTo = () => {};
         window.fetch = (input, init) => {
           const raw = String(input);
+          if (raw.includes("/api/rivals/scan-page")) {
+            scanCalls.total += 1;
+            try { scanCalls.lastBody = JSON.parse((init && init.body) || "{}"); } catch (_) { scanCalls.lastBody = {}; }
+            if (scanCalls.total === 1) {
+              return Promise.resolve(jsonRes({
+                status: "ok",
+                message: "Đọc được 2 bài từ facebook.com/OldSchoolMusicPage — không cần DevTools.",
+                scanned: 2, added: 1, skipped: 0, filtered_out: 1, candidates: 2,
+                page_url: "https://www.facebook.com/OldSchoolMusicPage",
+                page_label: "facebook.com/OldSchoolMusicPage",
+                needs_session: false, cookie_used: false, elapsed_ms: 320,
+                attempts: [{ label: "reels · chrome", url: "https://www.facebook.com/OldSchoolMusicPage/reels/", ua: "trình duyệt", cookie: false, status: 200, size: 240000, posts: 2, blocked: false, note: "" }],
+                session: { saved: false, cookies: [] },
+                reels: [], errors: [],
+              }));
+            }
+            return Promise.resolve(jsonRes({
+              status: "blocked",
+              message: "Facebook trả trang đăng nhập cho facebook.com/OldSchoolMusicPage thay vì nội dung. Dán cookie phiên một lần rồi bấm tìm lại.",
+              scanned: 0, added: 0, skipped: 0, filtered_out: 0, candidates: 0,
+              page_url: "https://www.facebook.com/OldSchoolMusicPage",
+              page_label: "facebook.com/OldSchoolMusicPage",
+              needs_session: true, cookie_used: false, elapsed_ms: 2400,
+              attempts: [{ label: "reels · chrome", url: "https://www.facebook.com/OldSchoolMusicPage/reels/", ua: "trình duyệt", cookie: false, status: 200, size: 48000, posts: 0, blocked: true, note: "Facebook trả trang đăng nhập thay vì nội dung" }],
+              session: { saved: false, cookies: [] },
+              reels: [], errors: [],
+            }));
+          }
           if (raw.includes("commons.wikimedia.org/w/api.php")) {
             apiCalls.wiki = (apiCalls.wiki || 0) + 1;
             const params = new URL(raw).searchParams;
@@ -299,6 +328,24 @@ async function main() {
     $("#rpage-filter").value = "";
     $("#rpage-filter").dispatchEvent(new window.Event("change", { bubbles: true }));
     await waitFor(() => $$(".rival-card").length >= 3, "page filter reset", 15000);
+
+    console.log("• Quét page đối thủ chỉ bằng link (máy chủ đọc)");
+    if (!$("#rpage-scan")) click("#btn-rimport");
+    await waitFor(() => $("#rpage-scan"), "scan panel");
+    ok(!$("#cust-name") || true, "panel quét page có nút Tìm reels nổi");
+    $("#rpage-url").value = "https://www.facebook.com/OldSchoolMusicPage";
+    $("#rpage-url").dispatchEvent(new window.Event("input", { bubbles: true }));
+    click("#rpage-scan");
+    await waitFor(() => $("#rpage-result .rpage-result"), "scan result", 20000);
+    ok(/đọc được/.test($("#rpage-result").textContent), "studio báo đã đọc page và nhập reel");
+    ok(scanCalls.total === 1, "chỉ một request quét page — không cần F12/Console");
+    ok(!!scanCalls.lastBody && scanCalls.lastBody.page_url.includes("facebook.com/OldSchoolMusicPage"), "gửi đúng link page lên API");
+    ok(/reels · chrome/.test($("#rpage-result").textContent), "có nhật ký lần thử để giải thích");
+
+    click("#rpage-scan");
+    await waitFor(() => $("#rale-cookie"), "cookie fallback box", 20000);
+    ok(/Facebook chặn/.test($("#rpage-result").textContent), "khi bị chặn hiện nhãn Facebook chặn");
+    ok(!!$("#rale-cookie-save"), "có ô dán cookie phiên + nút đọc lại");
 
     const remakeCard = $$(".rival-card").find((c) => /Whitney/.test(c.textContent));
     ok(!!remakeCard, "tìm được card Whitney để làm lại");

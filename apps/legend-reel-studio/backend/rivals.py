@@ -1,10 +1,13 @@
 """Competitor reel tracking: import, score, filter and turn into a remake brief.
 
-The studio never scrapes Facebook / Instagram / TikTok on its own. The operator
-either pastes a competitor page URL (and runs the studio's small extractor in
-their own logged-in browser, which reads the page they already have open) or
-pastes the numbers by hand. Either way the data lands here, where it is scored,
-ranked, explained, and turned into a remake brief that feeds a new project.
+Người vận hành chỉ cần dán **link page Facebook của đối thủ**; studio gọi
+`fb_fetch.scan_page()` để đọc page đó từ phía máy chủ (xem `fb_fetch.py`), rồi
+chuẩn hoá số liệu ở đây. Nếu Facebook chặn (đòi đăng nhập), studio vẫn nhận
+được JSON/HTML do trình duyệt của bạn đọc, hoặc số liệu bạn gõ tay.
+
+Dù dữ liệu đến từ đâu, phần còn lại giống nhau: chuẩn hoá link và số, chấm
+điểm nổi bật 0–100, xếp hạng, giải thích vì sao bài đó nổi, và biến nó thành
+brief làm lại cho một dự án mới.
 """
 
 from __future__ import annotations
@@ -363,10 +366,13 @@ def count_from_text(value: Any) -> int:
     return int(digits) if digits else 0
 
 
-def _metric(text: str, words: str) -> int:
+def metric_from_text(text: str, words: str) -> int:
     """Number that appears right before a metric word ('1.2K comments')."""
     match = re.search(r"([\d][\d.,\s]*\s*(?:k|m|b|n|tr|triệu|nghìn)?)\s*" + words, text, re.IGNORECASE)
     return count_from_text(match.group(1)) if match else 0
+
+
+_metric = metric_from_text
 
 
 def guess_format(text: str) -> str:
@@ -394,27 +400,72 @@ def hook_from_text(text: str, limit: int = 140) -> str:
     return hook.strip()
 
 
+_SINGLE_POST_RE = re.compile(
+    r"(?:/reels?/\d+|/videos?/\d+|/watch/?\?v=\d+|/posts?/\d+|/share/p/|/share/v/|story_fbid=|permalink\.php)",
+    re.IGNORECASE,
+)
+
+# đoạn đường dẫn không phải tên page (link reel/video/nhóm…) — dùng để nhận ra
+# "người dùng dán link một bài" thay vì link page.
+_NON_PAGE_SEGMENTS = frozenset(
+    {
+        "reel", "reels", "watch", "share", "videos", "video", "posts", "post", "photo", "photos",
+        "story.php", "permalink.php", "groups", "events", "hashtag", "p", "stories", "login",
+        "watchparty", "gaming", "marketplace", "media", "profile.php", "plugins", "help",
+    }
+)
+
+
+def is_single_post(url: str) -> bool:
+    """Link này trỏ tới một reel/video/bài cụ thể thay vì cả page?"""
+    text = (url or "").strip()
+    if not text:
+        return False
+    return bool(_SINGLE_POST_RE.search(text))
+
+
+def facebook_page_id(url: str) -> str:
+    """`profile.php?id=61565…` → `61565…` (page dạng id số)."""
+    match = re.search(r"[?&]id=(\d{5,})", url or "")
+    return match.group(1) if match else ""
+
+
 def normalize_page_url(url: str) -> str:
-    """`facebook.com/<page>/?ref=…` → `https://www.facebook.com/<page>` (or a profile id)."""
+    """`facebook.com/<page>/?ref=…` → `https://www.facebook.com/<page>`.
+
+    Giữ nguyên dạng id số (`profile.php?id=…`) và link một bài (reel/video/post)
+    vì cả hai đều là thứ người dùng có thể dán vào studio.
+    """
     text = (url or "").strip()
     if not text:
         return ""
     if not re.match(r"https?://", text, re.I):
         text = "https://" + text.lstrip("/")
     lowered = text.lower()
-    if "facebook.com" not in lowered:
+    if "facebook.com" not in lowered and "fb.watch" not in lowered:
         return text.split("?")[0].rstrip("/")
+
+    page_id = facebook_page_id(text)
+    if page_id and "profile.php" in lowered:
+        return f"https://www.facebook.com/profile.php?id={page_id}"
+
     path = re.sub(r"^https?://[^/]+", "", text, flags=re.I).split("?")[0].split("#")[0]
     match = re.match(r"^/(?:pg/|pages/[^/]+/)?([A-Za-z0-9._\-]+)", path)
     handle = match.group(1) if match else ""
+    if handle.lower() in _NON_PAGE_SEGMENTS:
+        # link một bài / nhóm / watch…: giữ nguyên để studio đọc đúng chỗ
+        return clean_url(text)
     if not handle:
-        return "https://www.facebook.com"
+        return ""
     return f"https://www.facebook.com/{handle}"
 
 
 def page_label(page_url: str) -> str:
     clean = normalize_page_url(page_url)
-    match = re.match(r"^https?://(?:www\.)?facebook\.com/([^/?#]+)", clean, re.I)
+    page_id = facebook_page_id(clean)
+    if page_id and "profile.php" in clean.lower():
+        return f"facebook.com/profile.php?id={page_id}"
+    match = re.match(r"^https?://(?:www\.|web\.|m\.)?facebook\.com/([^/?#]+)", clean, re.I)
     if match:
         return f"facebook.com/{match.group(1)}"
     return clean.replace("https://", "").replace("http://", "")

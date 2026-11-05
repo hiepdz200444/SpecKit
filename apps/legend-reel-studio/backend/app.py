@@ -20,6 +20,7 @@ from fastapi.staticfiles import StaticFiles
 
 import content
 import db
+import fb_fetch
 import images as images_mod
 import library
 import profiles
@@ -38,7 +39,7 @@ IMAGE_ID_RE = re.compile(r"^[a-f0-9]{8,32}$")
 for d in (DATA_DIR, IMAGE_DIR, VOICE_DIR):
     os.makedirs(d, exist_ok=True)
 
-APP_VERSION = "2.3.0"
+APP_VERSION = "2.4.0"
 _COMMIT_CACHE: dict[str, str] = {}
 
 
@@ -78,6 +79,8 @@ def version_info() -> dict:
             "rivals-ranking",
             "rivals-remake",
             "rivals-page-import",
+            "rivals-page-scan",
+            "rivals-session",
             "facebook-page-extractor",
             "article-by-name",
         ],
@@ -205,6 +208,7 @@ def bootstrap(day: str = Query(default="")):
         "custom_artists": db.list_custom_artists(),
         "rivals": {
             "count": len(db.list_rivals()),
+            "session": fb_fetch.cookie_status(),
             "platforms": rivals_mod.PLATFORMS,
             "formats": rivals_mod.FORMATS,
             "platform_labels": rivals_mod.PLATFORM_LABEL,
@@ -805,32 +809,15 @@ def _reel_record(item: dict, source_page: str = "") -> dict:
     }
 
 
-@app.post("/api/rivals/from-page")
-def import_from_page(payload: dict = Body(...)):
-    """Ba đường nhập từ một page đối thủ — tất cả đều do trình duyệt của bạn đọc.
-
-    1. `posts`: JSON do `web/assets/fb-extract.js` trích từ trang (khuyến nghị).
-    2. `html`:  HTML bạn lưu từ trang (Ctrl+S) — studio tự bóc khối `role="article"`.
-    3. `page_url` + `items`: danh sách bạn tự gõ nhưng muốn gắn chung một page.
-
-    Máy chủ KHÔNG tự gọi Facebook: không login, không scrape, không vi phạm điều khoản.
-    """
-    page_url = rivals_mod.normalize_page_url(payload.get("page_url") or "")
-    label = rivals_mod.page_label(page_url) if page_url else ""
-
-    items: list[dict] = []
-    if isinstance(payload.get("posts"), list):
-        items += rivals_mod.from_posts(payload["posts"], page_url)
-    if payload.get("html"):
-        items += rivals_mod.posts_from_html(payload["html"], page_url)
-    if isinstance(payload.get("items"), list):
-        items += [_reel_record(i, label) for i in payload["items"] if isinstance(i, dict)]
-    if not items:
-        raise HTTPException(
-            400,
-            "Không đọc được bài nào. Hãy cuộn page để tải thêm bài, chạy lại mã lấy bài và dán kết quả vào đây.",
-        )
-
+def _save_page_items(
+    items: list[dict],
+    page_url: str,
+    label: str,
+    *,
+    only_viral: bool = False,
+    min_score: int = 0,
+) -> dict:
+    """Khử trùng, chấm điểm, lọc "đã nổi" và lưu — dùng chung cho mọi đường nhập."""
     existing = db.list_rivals()
     seen_urls = {str(r.get("url") or "").lower() for r in existing if r.get("url")}
     seen_hooks = {
@@ -838,8 +825,6 @@ def import_from_page(payload: dict = Body(...)):
         for r in existing
         if r.get("hook") and r.get("platform") == "facebook"
     }
-    min_score = int(payload.get("min_score") or 0)
-    only_viral = bool(payload.get("only_viral"))
 
     skipped, low = 0, 0
     candidates: list[dict] = []
@@ -889,6 +874,139 @@ def import_from_page(payload: dict = Body(...)):
         "added": len(created),
         "skipped": skipped,
         "filtered_out": low,
+        "candidates": len(candidates),
+    }
+
+
+@app.post("/api/rivals/scan-page")
+def scan_rivals_page(payload: dict = Body(...)):
+    """Dán link page → studio tự đọc page đó và chỉ giữ bài đã nổi.
+
+    Không cần DevTools, không cần copy mã: máy chủ gọi facebook.com (thử lần lượt
+    UA trình duyệt / crawler, và cookie phiên nếu bạn đã lưu một lần), bóc số
+    liệu từ HTML, chấm điểm rồi lưu.
+
+    Nếu Facebook chặn, phản hồi có `status="blocked"` + `attempts` để giao diện
+    giải thích, kèm gợi ý lưu cookie phiên (`POST /api/rivals/session`).
+    """
+    raw = str(payload.get("page_url") or payload.get("url") or "").strip()
+    if not raw:
+        raise HTTPException(400, "Cần link page Facebook của đối thủ")
+    if rivals_mod.is_single_post(raw):
+        target = rivals_mod.clean_url(raw)
+    else:
+        target = rivals_mod.normalize_page_url(raw)
+    if not target:
+        raise HTTPException(400, "Link không giống link page Facebook — dán dạng facebook.com/ten-page")
+
+    label = rivals_mod.page_label(target)
+    only_viral = bool(payload.get("only_viral", True))
+    min_score = int(payload.get("min_score") or 0)
+    limit = max(1, min(120, int(payload.get("limit") or 40)))
+
+    scan = fb_fetch.scan_page(
+        target,
+        cookie="" if payload.get("ignore_session") else fb_fetch.load_cookie(),
+        budget_s=float(payload.get("budget_s") or fb_fetch.DEFAULT_BUDGET_S),
+    )
+    posts = (scan.get("posts") or [])[:limit]
+    result = {
+        "status": scan["status"],
+        "message": fb_fetch.explain(scan),
+        "scanned": len(scan.get("posts") or []),
+        "attempts": scan.get("attempts") or [],
+        "page_url": scan.get("page_url") or target,
+        "page_label": scan.get("page_label") or label,
+        "cookie_used": scan.get("cookie_used", False),
+        "needs_session": scan.get("needs_session", False),
+        "elapsed_ms": scan.get("elapsed_ms", 0),
+        "session": fb_fetch.cookie_status(),
+        "reels": [],
+        "added": 0,
+        "skipped": 0,
+        "filtered_out": 0,
+        "candidates": 0,
+        "errors": [],
+    }
+    if not posts:
+        return JSONResponse(result)
+
+    items = rivals_mod.from_posts(posts, target)
+    saved = _save_page_items(
+        items,
+        target,
+        result["page_label"],
+        only_viral=only_viral,
+        min_score=min_score,
+    )
+    result.update(saved)
+    return JSONResponse(result)
+
+
+@app.get("/api/rivals/session")
+def get_rivals_session():
+    """Cookie phiên Facebook đã lưu (một lần) để máy chủ đọc được page."""
+    return fb_fetch.cookie_status()
+
+
+@app.post("/api/rivals/session")
+def save_rivals_session(payload: dict = Body(...)):
+    """Lưu cookie phiên Facebook (cục bộ, `data/fb_session.json`, quyền 600).
+
+    Dán cookie một lần là từ đó chỉ cần dán link page. Studio chỉ gửi cookie này
+    tới facebook.com, không gửi cho bên thứ ba.
+    """
+    raw = str(payload.get("cookie") or "").strip()
+    if not raw:
+        raise HTTPException(400, "Cần cookie dạng `c_user=…; xs=…`")
+    if not fb_fetch.parse_cookie(raw):
+        raise HTTPException(400, "Cookie không đúng dạng cặp tên=giá trị")
+    try:
+        return fb_fetch.save_cookie(raw)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.delete("/api/rivals/session")
+def clear_rivals_session():
+    return fb_fetch.clear_cookie()
+
+
+@app.post("/api/rivals/from-page")
+def import_from_page(payload: dict = Body(...)):
+    """Ba đường nhập tay khi Facebook không cho máy chủ đọc page.
+
+    1. `posts`: JSON do `web/assets/fb-extract.js` trích từ trang bạn đang mở.
+    2. `html`:  HTML bạn lưu từ trang (Ctrl+S) — studio tự bóc khối `role="article"`.
+    3. `page_url` + `items`: danh sách bạn tự gõ nhưng muốn gắn chung một page.
+
+    Đường chính vẫn là `POST /api/rivals/scan-page` (chỉ cần link page).
+    """
+    page_url = rivals_mod.normalize_page_url(payload.get("page_url") or "")
+    label = rivals_mod.page_label(page_url) if page_url else ""
+
+    items: list[dict] = []
+    if isinstance(payload.get("posts"), list):
+        items += rivals_mod.from_posts(payload["posts"], page_url)
+    if payload.get("html"):
+        items += rivals_mod.posts_from_html(payload["html"], page_url)
+    if isinstance(payload.get("items"), list):
+        items += [_reel_record(i, label) for i in payload["items"] if isinstance(i, dict)]
+    if not items:
+        raise HTTPException(
+            400,
+            "Không đọc được bài nào. Dán link page vào ô trên để studio tự đọc, hoặc dán JSON lấy từ trang.",
+        )
+
+    saved = _save_page_items(
+        items,
+        page_url,
+        label,
+        only_viral=bool(payload.get("only_viral")),
+        min_score=int(payload.get("min_score") or 0),
+    )
+    return {
+        **saved,
         "page_url": page_url,
         "page_label": label,
         "errors": [],

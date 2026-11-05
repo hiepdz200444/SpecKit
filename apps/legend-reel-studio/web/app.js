@@ -193,7 +193,28 @@
     $$(".nav-item").forEach((b) => b.classList.toggle("active", b.dataset.nav === name));
   }
 
+  // Một lần render tại một thời điểm: nếu người dùng bấm/nav sang màn khác khi
+  // màn trước còn đang chờ API, lần render cũ không được ghi đè lên màn mới.
+  let routeBusy = false;
+  let routePending = false;
+
   async function route() {
+    if (routeBusy) {
+      routePending = true;
+      return;
+    }
+    routeBusy = true;
+    try {
+      do {
+        routePending = false;
+        await renderRoute();
+      } while (routePending);
+    } finally {
+      routeBusy = false;
+    }
+  }
+
+  async function renderRoute() {
     state.route = parseHash();
     const view = $("#view");
     if (!view) return;
@@ -723,7 +744,7 @@
           list.innerHTML = `
             <div class="empty">
               <h3>Chưa có reel nào</h3>
-              <p>Dán link page Facebook đối thủ để studio lọc ra những bài đã nổi, hoặc dán tay số liệu từng reel. Studio không scrape mạng xã hội: trình duyệt của bạn đọc trang, studio chấm điểm và xếp hạng.</p>
+              <p>Dán link page Facebook đối thủ — studio gọi thẳng facebook.com từ máy bạn, đọc bài công khai, chấm điểm rồi chỉ giữ những reel đã nổi. Không cần F12, không cần copy mã. Nếu Facebook đòi đăng nhập, dán cookie phiên một lần là xong.</p>
               <button class="btn btn-primary" id="empty-import">${ICON.plus} Nhập reel đầu tiên</button>
             </div>`;
           const emptyBtn = $("#empty-import");
@@ -839,12 +860,98 @@
     });
   }
 
-  const PAGE_IMPORT_STEPS = [
-    `Mở page đối thủ trong một tab: <code>facebook.com/&lt;tên-page&gt;</code>`,
-    `Cuộn xuống 3–5 lần để Facebook tải thêm bài (mỗi lần ~3–5 bài).`,
-    `Bấm <b>F12</b> → tab <b>Console</b> → dán mã vừa copy → <b>Enter</b>.`,
-    `Studio tự nhận bài nếu cùng máy; nếu không, quay lại đây dán JSON vào ô dưới.`,
-  ];
+  const RIVAL_SCAN_STATUS = {
+    ok: { label: "đọc được", cls: "tag-ok" },
+    blocked: { label: "Facebook chặn", cls: "tag-warn" },
+    empty: { label: "không thấy bài", cls: "tag-warn" },
+    error: { label: "lỗi mạng", cls: "tag-danger" },
+  };
+
+  function scanAttemptsHtml(attempts) {
+    if (!attempts || !attempts.length) return "";
+    return `
+      <details class="rpage-attempts" style="margin-top:8px">
+        <summary class="tiny muted">Nhật ký ${attempts.length} lần thử</summary>
+        <ul class="rival-steps" style="margin-top:8px">
+          ${attempts
+            .map((a) => `<li><b>${esc(a.label)}</b> · ${esc(a.ua)}${a.cookie ? " · có cookie" : ""} · HTTP ${esc(a.status || "—")} · ${fmtNum(a.size)} byte · ${esc(a.posts)} bài${a.note ? ` · <span class="muted">${esc(a.note)}</span>` : ""}</li>`)
+            .join("")}
+        </ul>
+      </details>`;
+  }
+
+  function renderScanResult(data, retry) {
+    const box = $("#rpage-result");
+    if (!box) return;
+    const meta = RIVAL_SCAN_STATUS[data.status] || RIVAL_SCAN_STATUS.error;
+    const bits = [];
+    if (data.scanned) bits.push(`đọc được ${data.scanned} bài`);
+    if (data.added) bits.push(`nhập ${data.added} bài đã nổi`);
+    if (data.filtered_out) bits.push(`loại ${data.filtered_out} bài chưa đủ nổi`);
+    if (data.skipped) bits.push(`bỏ ${data.skipped} bài đã có trong danh sách`);
+    const session = data.session || {};
+    const cookieBox = data.needs_session
+      ? `
+      <div class="rpage-session" style="margin-top:12px;padding:12px;border:1px solid var(--line);border-radius:12px;background:rgba(255,255,255,0.02)">
+        <div class="tiny" style="margin-bottom:6px">
+          <b>Đọc bằng phiên đăng nhập của bạn</b> — Facebook chỉ trả nội dung cho phiên đã đăng nhập.
+          Dán cookie <b>một lần</b>, từ đó mỗi lần chỉ cần dán link page.
+        </div>
+        <ol class="rival-steps">
+          <li>Mở <a href="https://www.facebook.com" target="_blank" rel="noopener">facebook.com</a> (đang đăng nhập) → <b>F12</b> → tab <b>Application</b> (Chrome) hoặc <b>Storage</b> (Firefox).</li>
+          <li>Mục <b>Cookies</b> → <code>https://www.facebook.com</code> → copy giá trị <code>c_user</code> và <code>xs</code>.</li>
+          <li>Dán vào ô dưới dạng <code>c_user=…; xs=…</code> → studio đọc lại page ngay.</li>
+        </ol>
+        <div class="row" style="gap:8px;flex-wrap:wrap">
+          <input class="input" id="rale-cookie" placeholder="c_user=615655…; xs=…" style="flex:1;min-width:240px" />
+          <button class="btn btn-primary btn-sm" id="rale-cookie-save">Lưu &amp; đọc lại</button>
+          ${session.saved ? `<button class="btn btn-ghost btn-sm" id="rale-cookie-clear">Xoá cookie đã lưu</button>` : ""}
+        </div>
+        <div class="banner-tip">Cookie chỉ nằm trên máy bạn (<code>data/fb_session.json</code>, quyền 600) và chỉ gửi tới facebook.com.</div>
+      </div>`
+      : "";
+    box.innerHTML = `
+      <div class="rpage-result" style="margin-top:12px">
+        <div class="row" style="gap:8px;flex-wrap:wrap">
+          <span class="tag ${meta.cls}">${esc(meta.label)}</span>
+          <span class="tiny">${esc(data.message || "")}</span>
+        </div>
+        ${bits.length ? `<div class="tiny muted" style="margin-top:6px">${esc(bits.join(" · "))}</div>` : ""}
+        ${scanAttemptsHtml(data.attempts)}
+        ${cookieBox}
+      </div>`;
+
+    const save = $("#rale-cookie-save");
+    if (save) {
+      save.onclick = async () => {
+        const value = (($("#rale-cookie") || {}).value || "").trim();
+        if (!value) return toast("Dán cookie dạng c_user=…; xs=…", "err");
+        save.disabled = true;
+        save.textContent = "Đang lưu…";
+        try {
+          await api("/api/rivals/session", { method: "POST", body: { cookie: value } });
+          toast("Đã lưu cookie phiên — đang đọc lại page", "ok");
+          await retry();
+        } catch (err) {
+          toast(err.message, "err");
+          save.disabled = false;
+          save.textContent = "Lưu & đọc lại";
+        }
+      };
+    }
+    const clear = $("#rale-cookie-clear");
+    if (clear) {
+      clear.onclick = async () => {
+        try {
+          await api("/api/rivals/session", { method: "DELETE" });
+          toast("Đã xoá cookie phiên", "ok");
+          await retry();
+        } catch (err) {
+          toast(err.message, "err");
+        }
+      };
+    }
+  }
 
   function openImportRivals(reload) {
     const panel = $("#rimport-panel");
@@ -852,7 +959,7 @@
       <div class="panel" style="margin-bottom:16px">
         <div class="panel-head">
           <h3>Nhập reel đối thủ</h3>
-          <span class="tiny muted">Studio không scrape mạng xã hội — trình duyệt của bạn đọc, bạn quyết định</span>
+          <span class="tiny muted">Dán link page → studio tự đọc và chấm điểm</span>
           <div class="spacer"></div>
           <button class="btn btn-sm btn-ghost" id="rimport-close">Đóng</button>
         </div>
@@ -864,31 +971,38 @@
 
           <div id="rmode-page">
             <div class="field">
-              <label>Link page đối thủ</label>
+              <label>Link page Facebook của đối thủ <span class="hint">chỉ cần dán link — không cần F12</span></label>
               <div class="row" style="gap:8px">
                 <input class="input" id="rpage-url" placeholder="https://www.facebook.com/ten-page" style="flex:1" />
                 <a class="btn btn-ghost" id="rpage-open" target="_blank" rel="noopener" hidden>Mở page</a>
-                <button class="btn btn-primary" id="rpage-copy">${ICON.copy} Copy mã lấy bài</button>
+                <button class="btn btn-primary" id="rpage-scan">${ICON.spark} Tìm reels nổi</button>
               </div>
             </div>
-            <div class="banner-tip" style="margin:10px 0 6px">
-              Facebook chặn máy chủ đọc page khi chưa đăng nhập, nên studio dùng <b>trình duyệt của bạn</b>
-              (đang đăng nhập sẵn) để đọc trang — không scrape, không cần token, không gửi gì cho bên thứ ba.
-            </div>
-            <ol class="rival-steps">
-              ${PAGE_IMPORT_STEPS.map((step) => `<li>${step}</li>`).join("")}
-            </ol>
-            <div class="field">
-              <label>JSON lấy được <span class="hint">dán vào đây nếu studio không tự nhận</span></label>
-              <textarea class="textarea" id="rpage-json" style="min-height:96px" placeholder='{"page_url":"https://www.facebook.com/…","posts":[{"url":"…","text":"…","likes":1200,"comments":84,"shares":12}]}'></textarea>
+            <div class="banner-tip" style="margin:0 0 10px">
+              Studio gọi thẳng facebook.com từ máy bạn, đọc phần công khai của page, chấm điểm rồi chỉ giữ bài đã nổi.
+              Không gửi link hay nội dung cho bên thứ ba. Facebook có thể đòi phiên đăng nhập — khi đó dán cookie một lần là xong.
             </div>
             <div class="row" style="gap:10px;align-items:center;flex-wrap:wrap">
-              <button class="btn btn-primary" id="rpage-import">${ICON.spark} Lọc bài đã nổi &amp; nhập</button>
               <label class="tiny muted" style="display:flex;gap:6px;align-items:center">
                 <input type="checkbox" id="rpage-only-viral" checked /> chỉ giữ bài đã nổi (điểm ≥ 65)
               </label>
               <span class="tiny muted" id="rpage-hint"></span>
             </div>
+            <div id="rpage-result"></div>
+
+            <details style="margin-top:14px">
+              <summary class="tiny muted" style="cursor:pointer">Facebook chặn hoặc bạn muốn tự dán số liệu</summary>
+              <div style="margin-top:10px">
+                <div class="field">
+                  <label>JSON lấy được <span class="hint">dán vào đây nếu studio không tự đọc được</span></label>
+                  <textarea class="textarea" id="rpage-json" style="min-height:96px" placeholder='{"page_url":"https://www.facebook.com/…","posts":[{"url":"…","text":"…","likes":1200,"comments":84,"shares":12}]}'></textarea>
+                </div>
+                <div class="row" style="gap:10px;align-items:center;flex-wrap:wrap">
+                  <button class="btn btn-ghost" id="rpage-copy">${ICON.copy} Copy mã lấy bài</button>
+                  <button class="btn btn-primary" id="rpage-import">${ICON.spark} Lọc bài đã nổi &amp; nhập</button>
+                </div>
+              </div>
+            </details>
           </div>
 
           <div id="rmode-manual" hidden>
@@ -923,6 +1037,46 @@
       if (url) openLink.href = /^https?:\/\//i.test(url) ? url : `https://${url}`;
     };
     pageInput.addEventListener("input", syncOpen);
+    pageInput.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") $("#rpage-scan").click();
+    });
+
+    const scan = async () => {
+      const url = (pageInput.value || "").trim();
+      if (!url) return toast("Dán link page Facebook của đối thủ trước đã", "err");
+      const btn = $("#rpage-scan");
+      const hint = $("#rpage-hint");
+      btn.disabled = true;
+      btn.innerHTML = `${ICON.refresh} Đang đọc page…`;
+      hint.textContent = "Đang gọi facebook.com từ máy bạn — thường 5–20 giây…";
+      $("#rpage-result").innerHTML = "";
+      try {
+        const res = await api("/api/rivals/scan-page", {
+          method: "POST",
+          body: { page_url: url, only_viral: $("#rpage-only-viral").checked },
+        });
+        const bits = [];
+        if (res.scanned) bits.push(`đọc ${res.scanned} bài`);
+        if (res.added) bits.push(`nhập ${res.added}`);
+        if (res.filtered_out) bits.push(`loại ${res.filtered_out}`);
+        if (res.skipped) bits.push(`bỏ ${res.skipped} bài đã có`);
+        hint.textContent = bits.length ? bits.join(" · ") : "";
+        renderScanResult(res, scan);
+        if (res.added) {
+          toast(`Đã nhập ${res.added} reel đã nổi từ ${res.page_label || "page"}`, "ok");
+          if (reload) await reload();
+        } else if (res.status === "ok") {
+          toast(res.message || "Không có bài mới để thêm", "err");
+        }
+      } catch (err) {
+        toast(err.message, "err");
+        hint.textContent = "";
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = `${ICON.spark} Tìm reels nổi`;
+      }
+    };
+    $("#rpage-scan").onclick = scan;
 
     $("#rpage-copy").onclick = async () => {
       try {
@@ -930,7 +1084,6 @@
         const code = await res.text();
         await copyText(code, "Đã copy mã — dán vào Console của trang Facebook đối thủ");
         $("#rpage-hint").textContent = "Đã copy mã ✓";
-        syncOpen();
       } catch (err) {
         toast(`Không copy được: ${err.message}`, "err");
       }
@@ -939,7 +1092,7 @@
     $("#rpage-import").onclick = async () => {
       const raw = ($("#rpage-json").value || "").trim();
       if (!raw) {
-        return toast("Dán JSON lấy từ trang, hoặc bấm Copy mã lấy bài trước", "err");
+        return toast("Dán JSON lấy từ trang, hoặc bấm Tìm reels nổi để studio tự đọc", "err");
       }
       let body;
       try {
@@ -961,8 +1114,7 @@
         $("#rpage-hint").textContent = bits.join(" · ");
         if (res.added) {
           $("#rpage-json").value = "";
-          panel.innerHTML = "";
-          await reload();
+          if (reload) await reload();
         }
       } catch (err) {
         toast(err.message, "err");
@@ -984,7 +1136,7 @@
         (res.errors || []).slice(0, 2).forEach((e) => toast(e, "err"));
         $("#rimport-lines").value = "";
         panel.innerHTML = "";
-        await reload();
+        if (reload) await reload();
       } catch (err) {
         toast(err.message, "err");
       } finally {

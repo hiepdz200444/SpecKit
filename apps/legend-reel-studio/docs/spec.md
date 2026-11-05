@@ -157,11 +157,11 @@ Người vận hành muốn viết về một người không có trong thư vi�
 
 ### User Story 7 - Đưa link page Facebook, studio tự lọc bài đã nổi (Priority: P1)
 
-Người vận hành có một page đối thủ cùng ngách. Họ dán link page vào studio, copy đoạn mã của studio, chạy nó trong Console của chính tab Facebook đang mở, thế là studio nhận về danh sách bài kèm số liệu và **chỉ giữ những bài đã nổi** — sẵn sàng bấm "Làm lại".
+Người vận hành có một page đối thủ cùng ngách. Họ **dán link page rồi bấm một nút**: máy chủ studio gọi thẳng facebook.com, đọc phần công khai của page, bóc số liệu từng bài và **chỉ giữ những bài đã nổi** — sẵn sàng bấm "Làm lại". Không phải mở DevTools, không phải copy mã (Console của Facebook chặn dán mã bằng cảnh báo self-XSS). Nếu Facebook đòi phiên đăng nhập, người dùng dán cookie **một lần** rồi từ đó chỉ cần dán link.
 
 **Why this priority**: Nhập tay từng reel rất chậm; đọc cả page một lần rồi lọc mới là cách dùng thật.
 
-**Independent Test**: Dán `facebook.com/OldSchoolMusicPage` → bấm "Copy mã lấy bài" → chạy mã trên page → studio thêm đúng các bài đạt ngưỡng, gắn nhãn page, bỏ bài trùng; lọc theo page còn đúng số bài; mỗi bài bấm "Làm lại" được.
+**Independent Test**: Dán `facebook.com/OldSchoolMusicPage` → bấm "Tìm reels nổi" → studio báo đã đọc N bài, nhập đúng các bài đạt ngưỡng, gắn nhãn page, bỏ bài trùng; khi Facebook trả trang đăng nhập, studio hiện nhật ký từng lần thử + ô dán cookie phiên và đọc lại được ngay; lọc theo page còn đúng số bài; mỗi bài bấm "Làm lại" được.
 
 **Acceptance Scenarios**:
 
@@ -170,7 +170,9 @@ Người vận hành có một page đối thủ cùng ngách. Họ dán link pa
 3. **Given** số liệu viết `1,2 N`, `1.234`, `1.2K`, `2,4 Tr`, **When** nhập, **Then** quy đổi đúng.
 4. **Given** HTML lưu từ trang (`Ctrl+S`), **When** gửi vào `POST /api/rivals/from-page` với `html`, **Then** studio bóc được các khối `role="article"` kèm số liệu và link bài.
 5. **Given** nhiều page đối thủ, **When** mở danh sách, **Then** lọc được theo page và thấy số bài của từng page.
-6. **Given** yêu cầu không scrape, **When** nhập, **Then** máy chủ KHÔNG gọi Facebook; mọi dữ liệu đến từ trình duyệt của người dùng hoặc do người dùng dán.
+6. **Given** link page hợp lệ, **When** bấm "Tìm reels nổi", **Then** máy chủ tự thử trang reels → videos → tường page bằng UA trình duyệt và UA crawler, và trả về `status` (`ok`/`blocked`/`empty`/`error`) kèm nhật ký từng lần thử (URL, UA, HTTP, số byte, số bài).
+7. **Given** Facebook trả trang đăng nhập, **When** người dùng dán cookie phiên (`c_user`, `xs`) một lần, **Then** studio lưu cục bộ (`data/fb_session.json`, quyền 600), chỉ gửi cookie tới facebook.com, và đọc lại page ngay mà không cần thao tác gì thêm.
+8. **Given** người dùng dán link một reel/video (`/reel/<id>`, `/videos/<id>`, `watch/?v=`) hoặc link page dạng id số (`profile.php?id=…`), **When** bấm tìm, **Then** studio đọc đúng bài đó / đúng page đó.
 
 ---
 
@@ -200,14 +202,16 @@ Người vận hành có một page đối thủ cùng ngách. Họ dán link pa
 - **FR-019**: Nút “Tự động lấy 20 ảnh” PHẢI lấy và lưu ảnh trong một lần bấm (`POST /images/auto`); khi máy chủ không có Internet, studio PHẢI tự chuyển sang tải ảnh bằng trình duyệt và upload qua `data_url`, kèm tiến trình “Đang tải i/n”.
 - **FR-021**: Studio PHẢI có nút “Tải về máy” xuất một `.zip` gồm `article.md`, `project.json`, ảnh JPEG + `ATTRIBUTION.txt`, voice và `HUONG-DAN.txt`.
 - **FR-022**: UI PHẢI có công cụ “Kiểm tra mạng” gọi thử Wikipedia/Commons từ trình duyệt và gửi kết quả về `POST /api/client-log` để chẩn đoán khi máy chủ bị chặn mạng.
-- **FR-026**: Hệ thống PHẢI cho nhập reel đối thủ bằng dán tay (`url | nền tảng | views | likes | comments | shares | nghệ sĩ | hook | format`), hiểu số viết tắt `1.2M`, `84k`, `2.1 nghìn`, `1.5 triệu`, `1,234`; KHÔNG scrape Facebook/Instagram/TikTok.
+- **FR-026**: Hệ thống PHẢI cho nhập reel đối thủ bằng dán tay (`url | nền tảng | views | likes | comments | shares | nghệ sĩ | hook | format`), hiểu số viết tắt `1.2M`, `84k`, `2.1 nghìn`, `1.5 triệu`, `1,234`; chỉ đọc đúng URL người dùng đưa vào — không có scraper chạy nền, không token, không gửi dữ liệu cho bên thứ ba.
 - **FR-027**: Mỗi reel PHẢI được chấm điểm "đã nổi" 0–100 (độ phủ ≤50 + tương tác ≤40 + độ mới ≤10) kèm nhãn, và PHẢI lọc/sắp xếp được theo điểm, view, tương tác, mới nhất, nền tảng, format, trạng thái, "chưa làm lại".
 - **FR-028**: Mỗi reel PHẢI có brief làm lại: mẫu hook theo format, timeline từng nhịp, nhịp độ, lý do reel ăn view, quy tắc làm lại.
 - **FR-029**: PHẢI làm lại reel bằng một nút: tạo dự án mới qua đúng pipeline (bài 700–900 từ, ảnh có license, text & voice), gắn brief vào dự án và vào `article.md`/`bundle.zip`, đánh dấu reel đang làm lại. Bản làm lại PHẢI dùng chữ do studio sinh và ảnh có license — KHÔNG dùng video/audio/ảnh/chữ của đối thủ.
 - **FR-030**: PHẢI tạo được bài viết từ tên nhân vật bất kỳ (`POST /api/projects/custom`), có trường tuỳ chọn (nghệ danh, thể loại, giai đoạn, quê quán, năm sinh/mất, giọng, link nguồn, bài hát, ghi chú); profile lưu lại để tái dùng, không tạo trùng, xoá được khi chưa có dự án; link nhạc cho profile tự tạo PHẢI là link tìm kiếm.
 - **FR-031**: Hệ thống PHẢI nhập được reel từ **link page đối thủ**: `POST /api/rivals/from-page` nhận `posts` (JSON do script trong trình duyệt người dùng trích), `html` (trang đã lưu) hoặc `items`; mỗi reel lưu `source_page`; PHẢI bỏ bài trùng theo link/hook và trả về số bài thêm/bỏ qua/loại.
 - **FR-032**: Khi nhập từ page, PHẢI có chế độ **chỉ giữ bài đã nổi** (≥ 60 điểm; nếu cả page chưa đạt 60 thì giữ top 40% của page đó), và danh sách PHẢI lọc được theo `source_page` + `only_viral`.
-- **FR-033**: Studio PHẢI cung cấp sẵn mã đọc trang (`/assets/fb-extract.js`) để người dùng chạy trong Console của chính trang Facebook họ đang mở; mã chỉ đọc DOM, gửi kết quả về studio của người dùng và có đường dự phòng copy JSON khi trình duyệt chặn. Máy chủ KHÔNG được scrape Facebook/Instagram/TikTok.
+- **FR-033**: Studio PHẢI giữ đường dự phòng đọc page bằng chính trang người dùng đang mở: `/assets/fb-extract.js` (chạy trong Console hoặc dán vào ô JSON) và `POST /api/rivals/from-page` nhận `posts` / `html` / `items`.
+- **FR-034**: `POST /api/rivals/scan-page` PHẢI cho phép **chỉ dán link page** là studio tự đọc: gọi `/<page>/reels/`, `/<page>/videos/`, `/<page>` (và `profile.php?id=…&sk=reels|videos` cho page dạng id số), thử lần lượt UA trình duyệt / Googlebot / facebookexternalhit, bóc `video_id`/`play_count`/`reaction_count`/`comment_count`/`share_count`/`creation_time`/`permalink_url` trong JSON nhúng và khối `role="article"`, gộp + khử trùng, chấm điểm, rồi chỉ nhập bài đã nổi. Phản hồi PHẢI có `status` (`ok|blocked|empty|error`), `attempts` (URL, UA, HTTP, số byte, số bài, ghi chú), `needs_session` và `message` giải thích bằng tiếng Việt. Tổng thời gian PHẢI có ngân sách (mặc định ≤ 30 giây) để giao diện không treo.
+- **FR-035**: Khi Facebook đòi đăng nhập, studio PHẢI cho lưu **cookie phiên một lần** qua `POST /api/rivals/session` (đọc/xoá qua `GET`/`DELETE`), lưu ở `data/fb_session.json` với quyền `600`, chỉ gửi tới facebook.com, và PHẢI tự đọc lại page ngay sau khi lưu.
 - **FR-020**: Sau khi lấy ảnh, người dùng PHẢI tải được ảnh về máy: từng ảnh qua nút “Tải về”, cả bộ qua `images.zip` (JPEG + `ATTRIBUTION.txt`).
 
 ### Key Entities

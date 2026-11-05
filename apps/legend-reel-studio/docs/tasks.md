@@ -77,6 +77,14 @@
 - [x] T055 `web/assets/fb-extract.js`: script chạy trong Console của trang Facebook (đọc DOM, gửi thẳng về studio, dự phòng copy JSON); UI tab "Từ link page Facebook" (link page + copy mã + dán JSON + checkbox chỉ bài đã nổi), lọc theo page, chip "chỉ bài đã nổi"; README §5, `spec.md` FR-031…FR-033 + user story 7, `plan.md`, version 2.3.0 (91 pytest, 79 jsdom check UI + 12 check cho fb-extract)
 - [x] T053 CSS cho `rival-*`/`tier-*`/`remake-card` (desktop + mobile); bump `APP_VERSION` 2.2.0 + `features` (`rivals-ranking`, `rivals-remake`, `article-by-name`); cập nhật README mục 5–6, `docs/spec.md` FR-026…FR-030, jsdom smoke lên 69 check (77 pytest)
 
+## Phase 8: Dán link page là xong
+
+- [x] T056 `backend/fb_fetch.py`: dán link page → máy chủ tự đọc (reels → videos → tường page; UA chrome/googlebot/facebookexternalhit; ngân sách 30 s), bóc JSON nhúng (`play_count`, `reaction_count{count}`, `comment_count`, `share_count`, `creation_time`, `permalink_url`), bóc `role="article"`, gộp + khử trùng, nhận diện tường đăng nhập, cookie phiên một lần (`data/fb_session.json`, 600), `explain()` trả câu giải thích tiếng Việt
+- [x] T057 API `POST /api/rivals/scan-page` (status/attempts/needs_session/message + nhập bài đã nổi) và `GET/POST/DELETE /api/rivals/session`; tách `_save_page_items()` dùng chung với `from-page`; `normalize_page_url` giữ `profile.php?id=…` và link một bài; bump `APP_VERSION` 2.4.0
+- [x] T058 UI tab "Từ link page Facebook": một ô link + nút **Tìm reels nổi** (Enter cũng chạy), nhật ký từng lần thử, ô dán cookie phiên + "Lưu & đọc lại", JSON/`Copy mã` chuyển xuống mục dự phòng; bỏ hướng dẫn F12/Console khỏi luồng chính
+- [x] T059 Sửa race điều hướng: `route()` xếp hàng render để màn cũ không ghi đè màn mới (jsdom smoke hết flaky)
+- [x] T060 Test: `tests/test_fb_fetch.py` (22 test: URL/profie id/link một bài, bóc JSON + `role="article"` + og, gộp bài trùng, tường đăng nhập, cookie, HTTP thật qua server nội bộ, endpoint) → **113 pytest**; jsdom smoke **86 check** (thêm 6 check cho luồng quét page + fallback cookie)
+
 ## Backlog (chưa làm)
 
 - [ ] T034 Đăng trực tiếp qua Facebook Graph API (cần quyền Page)

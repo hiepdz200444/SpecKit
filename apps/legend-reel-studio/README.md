@@ -14,7 +14,7 @@ Hai đường vào mới: **xem reel của đối thủ đã nổi** rồi **là
 
 | Bước | Bạn làm gì | Studio làm gì |
 | --- | --- | --- |
-| **0. Nghiên cứu** | Dán link page Facebook đối thủ | Trình duyệt của bạn đọc page, studio chấm điểm và chỉ giữ những bài đã nổi, kèm brief cấu trúc để làm lại |
+| **0. Nghiên cứu** | Dán link page Facebook đối thủ | Studio gọi thẳng facebook.com từ máy bạn, đọc bài công khai, chấm điểm và chỉ giữ những bài đã nổi, kèm brief cấu trúc để làm lại — **không cần F12/Console** |
 | **1. Khám phá** | Chọn ngày + khoảng ± ngày, lọc theo loại sự kiện, tìm theo nghệ sĩ/bài hát/thể loại | Quét thư viện 27 huyền thoại, trả về sự kiện đúng ngày kèm 3 bài nhạc và link nghe thử |
 | **2. Bài báo** | Sửa tiêu đề và nội dung, chọn biến thể tiêu đề, copy từng khối | Sinh bài báo tiếng Anh **700–900 từ** (đếm từ trực tiếp, cảnh báo khi ra ngoài khoảng), 3 biến thể tiêu đề, 3 link nhạc; mỗi khối có nút Copy |
 | **3. Ảnh nghệ sĩ** | Bấm lấy ảnh tự động, dán link ảnh nguồn khác, chọn ảnh banner, tải về hoặc tải cả bộ `.zip` | Lấy ảnh từ **Wikipedia + Wikimedia Commons** kèm **giấy phép + tác giả + link trang gốc**; tải link ảnh bạn dán (Pinterest/Getty — **không scrape**), upload ảnh; mục tiêu **1 banner + 20 ảnh** |
@@ -147,6 +147,7 @@ apps/legend-reel-studio/
 │   ├── content.py        # bài báo 700–900 từ, chữ 9–15 từ, hook, caption, checks
 │   ├── profiles.py       # profile sinh từ đúng cái tên (bài 700–900 từ, link nhạc dạng tìm kiếm)
 │   ├── rivals.py         # chấm điểm reel đối thủ, brief làm lại, đọc dòng nhập tay, bóc HTML/JSON từ page
+│   ├── fb_fetch.py       # dán link page → tự gọi facebook.com, bóc số liệu, nhật ký từng lần thử, cookie phiên
 │   ├── images.py         # Wikipedia + Wikimedia Commons (license), tải link, lưu JPEG
 │   └── voice.py          # edge-tts (en-US neural) → fallback pyttsx3
 ├── web/                  # SPA thuần JS + CSS, font OFL
@@ -162,9 +163,9 @@ apps/legend-reel-studio/
 
 Mục **Reels đối thủ** (sidebar) để bạn ghi lại những reel cùng ngách đang ăn view, rồi rút cấu trúc của chúng cho bài của mình.
 
-- **Đưa link page Facebook, studio lọc bài đã nổi**: dán `facebook.com/<ten-page>` vào ô “Từ link page Facebook”, bấm **Copy mã lấy bài**, rồi mở page đó và chạy mã trong Console của trình duyệt (F12 → Console → dán → Enter). Mã đọc chính trang bạn đang xem, gom mọi bài đã tải (hook, thời gian, reactions/comment/share/views), gửi về studio — bài nào đạt ngưỡng nổi bật mới được nhập, phần còn lại bị loại. Nếu trình duyệt chặn gửi thẳng (trang https gọi về `http://127.0.0.1`), mã tự copy JSON để bạn dán vào ô trong studio.
-  - Vì sao phải qua trình duyệt: Facebook chặn máy chủ đọc page khi chưa đăng nhập, và không có API công khai cho page của người khác. Studio **không scrape**, không dùng token, không gửi dữ liệu cho bên thứ ba — mọi thứ chạy trên máy bạn.
-  - Có thể dán thẳng **HTML lưu từ trang** (`Ctrl+S`) vào `POST /api/rivals/from-page` với trường `html`; studio bóc các khối `role="article"`.
+- **Đưa link page Facebook, studio lọc bài đã nổi**: dán `facebook.com/<ten-page>` (hoặc link dạng `profile.php?id=…`, hoặc link một reel) vào ô “Từ link page Facebook” rồi bấm **Tìm reels nổi**. Máy chủ studio tự gọi facebook.com, thử lần lượt trang **reels → videos → tường page** bằng UA trình duyệt và UA crawler, bóc `play_count` / `reaction_count` / `comment_count` / `share_count` / `creation_time` trong JSON nhúng (và cả khối `role="article"` nếu Facebook trả HTML), rồi chấm điểm và chỉ nhập bài đã nổi. **Không cần mở DevTools, không cần copy mã.**
+  - Facebook thường chỉ trả nội dung cho phiên đã đăng nhập. Khi đó studio báo `status=blocked` cùng **nhật ký từng lần thử** (URL · UA · HTTP · số byte · số bài) và hiện ô **dán cookie phiên một lần** (`c_user=…; xs=…`, lấy ở F12 → Application → Cookies). Cookie lưu cục bộ ở `data/fb_session.json` (quyền 600), chỉ gửi tới facebook.com — từ lần sau chỉ cần dán link page.
+  - Đường dự phòng vẫn còn khi Facebook chặn hẳn: nút **Copy mã lấy bài** (dán vào Console của trang đang mở) hoặc dán **JSON/HTML** lưu từ trang vào `POST /api/rivals/from-page`.
 - **Nhập tay**: mỗi dòng `url | nền tảng | views | likes | comments | shares | nghệ sĩ | hook | format`. Số viết kiểu `1.2M`, `84k`, `2.1 nghìn`, `1.5 triệu` hay `1,234` đều hiểu đúng. Nền tảng để trống thì studio đoán từ link.
 - **Chấm “đã nổi”**: điểm 0–100 = độ phủ (≤50) + tỉ lệ tương tác (≤40) + độ mới (≤10), kèm nhãn `Đột phá / Nổi / Khá / Mới`. Reel ít view nhưng tương tác cao vẫn có thể vượt reel triệu view — đúng ý “đã nổi”, không chỉ “nhiều view”.
 - **Lọc & xếp hạng**: tìm theo hook/nghệ sĩ, lọc theo **page đối thủ**, nền tảng, format, trạng thái, `chỉ bài đã nổi`, `điểm tối thiểu`, `chưa làm lại`, xếp theo điểm / view / tương tác / mới nhất.
@@ -226,6 +227,8 @@ API lưu voice vào `data/voice/<project>/`, trả URL để **nghe thử trong 
 | GET | `/api/artists`, `/api/artists/{id}` | Danh sách/chi tiết nghệ sĩ |
 | POST | `/api/events/custom` | Thêm sự kiện riêng |
 | GET/POST | `/api/rivals` | Danh sách/nhập reel đối thủ (`lines` hoặc `items`), lọc (`page`, `only_viral`, …) + xếp theo điểm đã nổi |
+| POST | `/api/rivals/scan-page` | **Dán link page → tự đọc và nhập reel đã nổi**: `{page_url, only_viral?, min_score?, limit?}`; trả `status` (`ok\|blocked\|empty\|error`), `attempts`, `needs_session`, số bài đã đọc/đã nhập |
+| GET/POST/DELETE | `/api/rivals/session` | Trạng thái/lưu/xoá cookie phiên Facebook (một lần) để máy chủ đọc được page |
 | POST | `/api/rivals/from-page` | Nhập từ page đối thủ: `{page_url, posts?, html?, only_viral?}` — JSON do `web/assets/fb-extract.js` trích trong trình duyệt, hoặc HTML lưu từ trang |
 | GET | `/api/rivals/pages` | Các page đã có reel trong studio (cho bộ lọc) |
 | PATCH/DELETE | `/api/rivals/{id}` | Sửa/xoá reel (ghi chú, trạng thái `moi\|dang-lam\|da-lam`) |
@@ -266,11 +269,11 @@ cd apps/legend-reel-studio
 . .venv/bin/activate
 pytest -q                              # API, nội dung, ảnh (mock mạng), voice (mock engine)
 npm install                            # chỉ cần cho test UI (jsdom)
-node tests/ui_smoke.mjs               # jsdom: sidebar 5 mục, 3 tab, copy, banner, voice, reels đối thủ, nhập từ page, bài theo tên
+node tests/ui_smoke.mjs               # jsdom: sidebar 5 mục, 3 tab, copy, banner, voice, reels đối thủ, quét page bằng link, nhập từ page, bài theo tên
 node tests/fb_extract.mjs             # jsdom: mã lấy bài đọc đúng DOM kiểu Facebook
 ```
 
-`pytest` bao gồm: tính sự kiện theo ngày (kể cả 29/02), tìm kiếm, ràng buộc 9–15 từ, **bài báo luôn 700–900 từ cho cả 27 nghệ sĩ**, import ảnh từ Wikipedia/Commons với license, chặn link Pinterest/`localhost`/HTML, zip + `ATTRIBUTION.txt`, voice với cả ba nhánh (edge-tts, pyttsx3, không có engine), **profile tạo bằng tên** (700–900 từ, không in “0 years”, link nhạc dạng tìm kiếm), **reel đối thủ** (đọc số `1.2M/84k/1,5 triệu`, chấm điểm, lọc, làm lại, brief nằm trong `.md`/`bundle.zip`) và **nhập từ page** (chuẩn hoá `1,2 N` / `1.234`, bóc khối `role="article"` từ HTML, lọc bài đã nổi, bỏ trùng, lọc theo page).
+`pytest` bao gồm: tính sự kiện theo ngày (kể cả 29/02), tìm kiếm, ràng buộc 9–15 từ, **bài báo luôn 700–900 từ cho cả 27 nghệ sĩ**, import ảnh từ Wikipedia/Commons với license, chặn link Pinterest/`localhost`/HTML, zip + `ATTRIBUTION.txt`, voice với cả ba nhánh (edge-tts, pyttsx3, không có engine), **profile tạo bằng tên** (700–900 từ, không in “0 years”, link nhạc dạng tìm kiếm), **reel đối thủ** (đọc số `1.2M/84k/1,5 triệu`, chấm điểm, lọc, làm lại, brief nằm trong `.md`/`bundle.zip`) và **nhập từ page** (chuẩn hoá `1,2 N` / `1.234`, bóc khối `role="article"` từ HTML, lọc bài đã nổi, bỏ trùng, lọc theo page) và **quét page bằng link** (`fb_fetch`: đọc JSON nhúng `video_id`/`play_count`/`reaction_count`, gộp bài trùng, nhận diện tường đăng nhập, cookie phiên, HTTP thật qua server nội bộ).
 
 ## 13. Giới hạn đã biết
 
