@@ -187,7 +187,7 @@ async function main() {
     ok(/Legends Studio v2\./.test($("#side-version").textContent), `sidebar hiện phiên bản (${$("#side-version").textContent.trim()})`);
 
     console.log("• Sidebar navigation");
-    ok($$("[data-nav]").length === 4, "4 sidebar items found");
+    ok($$("[data-nav]").length === 5, "5 sidebar items found (có Reels đối thủ)");
 
     click('[data-nav="discover"]');
     await waitFor(() => window.location.hash === "#/discover" && $("#discover-results .section-head"), "discover view");
@@ -208,6 +208,63 @@ async function main() {
     click('[data-nav="dashboard"]');
     await waitFor(() => apiCalls.events > before && $("#view .hero"), "re-render on second click");
     ok(apiCalls.events > before, "clicking the active sidebar item re-renders the view");
+
+    console.log("• Tạo bài viết bằng tên nhân vật");
+    window.location.hash = "#/discover";
+    await waitFor(() => $("#cust-name") && $("#cust-create"), "custom-name panel");
+    $("#cust-name").value = "Michael Jackson";
+    $("#cust-genre").value = "Pop / Soul";
+    $("#cust-songs").value = "Thriller | 1982\nBillie Jean | 1983";
+    $("#cust-facts").value = "Anh ấy thu âm Thriller trong tám tuần.";
+    click("#cust-create");
+    await waitFor(() => /#\/project\//.test(window.location.hash), "custom project route", 25000);
+    await waitFor(() => $(".studio-title h1"), "custom project studio");
+    ok($(".studio-title h1").textContent.includes("Michael Jackson"), "studio mở đúng nhân vật vừa nhập");
+    const customProject = await nodeFetch(`${base}/api/projects/${window.location.hash.split("/")[2]}`).then((r) => r.json());
+    ok(customProject.article_words >= 700 && customProject.article_words <= 900, `bài theo tên nhân vật dài ${customProject.article_words} từ`);
+    ok(customProject.artist.custom === true, "nhân vật được lưu thành profile tự tạo");
+    ok((customProject.music_links || []).length === 2, "bài hát nhập tay vào đúng link nhạc");
+    ok(/Thriller/.test(customProject.article_body), "bài viết có nhắc bài hát đã nhập");
+
+    console.log("• Reels đối thủ");
+    window.location.hash = "#/rivals";
+    await waitFor(() => $("#btn-rimport") && $(".empty, .rival-card"), "rivals screen");
+    click("#btn-rimport");
+    await waitFor(() => $("#rimport-lines"), "import panel");
+    $("#rimport-lines").value = [
+      "https://tiktok.com/@x/video/1 | tiktok | 1.2M | 84k | 2.1k | 900 | Whitney Houston | The note nobody talks about | story",
+      "https://instagram.com/reel/abc/ | instagram | 320k | 25k | 1.4k | 600 | Selena | She recorded this at nine | pov",
+    ].join("\n");
+    click("#rimport-save");
+    await waitFor(() => $$(".rival-card").length >= 2, "imported reels render", 20000);
+    ok($$(".rival-card").length >= 2, "nhập 2 reel đối thủ");
+    ok(Number($(".rival-score b").textContent) > 0, "reel có điểm nổi bật");
+    ok(/views/.test($(".rival-metrics").textContent), "hiện số liệu views/like/comment");
+    $$(".rival-brief summary")[0].dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+    ok($$(".rival-beats li").length >= 3, "brief làm lại có cấu trúc từng nhịp");
+
+    ok(!!$("#rsort") && !!$("#rplatform"), "có bộ lọc nền tảng + sắp xếp");
+    $("#rplatform").value = "instagram";
+    $("#rplatform").dispatchEvent(new window.Event("change", { bubbles: true }));
+    await waitFor(() => $$(".rival-card").length === 1, "platform filter", 15000);
+    ok($$(".rival-card").length === 1, "lọc theo nền tảng Instagram");
+    $("#rplatform").value = "";
+    $("#rplatform").dispatchEvent(new window.Event("change", { bubbles: true }));
+    await waitFor(() => $$(".rival-card").length >= 2, "filter reset", 15000);
+
+    click("[data-remake]");
+    await waitFor(() => $("#rm-artist"), "remake modal");
+    ok(/Làm lại reel này/.test($(".modal").textContent), "mở hộp thoại làm lại");
+    $("#rm-kind").value = "";
+    click('[data-act="go"]');
+    await waitFor(() => /#\/project\//.test(window.location.hash), "remake project route", 25000);
+    await waitFor(() => $(".remake-card"), "remake banner");
+    ok(/Làm lại từ reel đối thủ/.test($(".remake-card").textContent), "studio hiện nguồn reel gốc");
+    ok($$(".remake-card .rival-beats li").length >= 3, "studio giữ brief cấu trúc");
+    const remadeId = window.location.hash.split("/")[2];
+    const remade = await nodeFetch(`${base}/api/projects/${remadeId}`).then((r) => r.json());
+    ok(remade.remake && remade.remake.rival_id, "dự án lưu liên kết tới reel gốc");
+    ok(remade.article_words >= 700 && remade.article_words <= 900, `bản làm lại dài ${remade.article_words} từ`);
 
     console.log("• Seed a project (article + script + images)");
     const events = await nodeFetch(`${base}/api/events?day=2026-11-04&window=400&q=elvis`).then((r) => r.json());

@@ -21,6 +21,8 @@ import content
 import db
 import images as images_mod
 import library
+import profiles
+import rivals as rivals_mod
 import voice as voice_mod
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -35,7 +37,7 @@ IMAGE_ID_RE = re.compile(r"^[a-f0-9]{8,32}$")
 for d in (DATA_DIR, IMAGE_DIR, VOICE_DIR):
     os.makedirs(d, exist_ok=True)
 
-APP_VERSION = "2.1.0"
+APP_VERSION = "2.2.0"
 _COMMIT_CACHE: dict[str, str] = {}
 
 
@@ -72,8 +74,19 @@ def version_info() -> dict:
             "bundle-download",
             "voice-new-take-per-render",
             "no-video-render",
+            "rivals-ranking",
+            "rivals-remake",
+            "article-by-name",
         ],
     }
+
+
+def resolve_artist(artist_id: str) -> dict:
+    """Curated library artist, or a profile the operator created by name."""
+    artist = library.get_artist(artist_id)
+    if artist:
+        return artist
+    return db.get_custom_artist(artist_id) or {}
 
 
 STATUS_LABELS = {
@@ -127,7 +140,7 @@ def _banner_url(project: dict, public_images: list[dict], artist: dict) -> str:
 
 
 def serialize_project(p: dict) -> dict:
-    artist = library.get_artist(p["artist_id"]) or {}
+    artist = resolve_artist(p["artist_id"])
     out = dict(p)
     out["artist"] = artist
     public_images = _images(p)
@@ -186,6 +199,14 @@ def bootstrap(day: str = Query(default="")):
         },
         "voices": voice_mod.NEURAL_VOICES,
         "tts_engines": voice_mod.engines(),
+        "custom_artists": db.list_custom_artists(),
+        "rivals": {
+            "count": len(db.list_rivals()),
+            "platforms": rivals_mod.PLATFORMS,
+            "formats": rivals_mod.FORMATS,
+            "platform_labels": rivals_mod.PLATFORM_LABEL,
+            "format_labels": rivals_mod.FORMAT_LABEL,
+        },
         "version": version_info(),
     }
 
@@ -205,12 +226,47 @@ def events(
 
 @app.get("/api/artists")
 def artists():
-    return {"artists": library.artists_index()}
+    return {"artists": library.artists_index(), "custom": db.list_custom_artists()}
+
+
+@app.get("/api/artists/custom")
+def custom_artists():
+    return {"artists": db.list_custom_artists()}
+
+
+@app.post("/api/artists/custom")
+def create_custom_artist(payload: dict = Body(...)):
+    name = (payload.get("name") or "").strip()
+    if not name:
+        raise HTTPException(400, "Cần tên nhân vật")
+    existing = db.find_custom_artist(name)
+    if existing:
+        return {"artist": existing, "created": False}
+    profile = profiles.normalize({**payload, "name": name})
+    artist = db.create_custom_artist(profile)
+    return {"artist": artist, "created": True}
+
+
+@app.patch("/api/artists/custom/{aid}")
+def patch_custom_artist(aid: str, payload: dict = Body(...)):
+    if not db.get_custom_artist(aid):
+        raise HTTPException(404, "Không tìm thấy nhân vật")
+    return {"artist": db.update_custom_artist(aid, payload)}
+
+
+@app.delete("/api/artists/custom/{aid}")
+def remove_custom_artist(aid: str):
+    if not db.get_custom_artist(aid):
+        raise HTTPException(404, "Không tìm thấy nhân vật")
+    if db.count_projects_for_artist(aid):
+        raise HTTPException(400, "Nhân vật này đang có dự án — xoá dự án trước")
+    db.delete_custom_artist(aid)
+    return {"ok": True}
 
 
 @app.get("/api/artists/{artist_id}")
 def artist_detail(artist_id: str):
-    artist = library.get_artist(artist_id)
+    artist = resolve_artist(artist_id)
     if not artist:
         raise HTTPException(404, "Không tìm thấy nghệ sĩ")
     return {"artist": artist}
@@ -245,6 +301,40 @@ def create_project(payload: dict = Body(...)):
         raise HTTPException(400, "Thiếu sự kiện")
     seed = int(payload.get("seed") or (int(time.time() * 1000) % 99991))
     project = db.create_project(artist_id, event, seed)
+    if payload.get("generate", True):
+        project = apply_generation(project, section="all", seed=seed)
+    return serialize_project(project)
+
+
+@app.post("/api/projects/custom")
+def create_project_for_name(payload: dict = Body(...)):
+    """Tạo bài viết bằng tên nhân vật: name (+ optional profile) + occasion."""
+    name = (payload.get("name") or payload.get("artist_name") or "").strip()
+    if not name:
+        raise HTTPException(400, "Cần tên nhân vật")
+    artist = db.find_custom_artist(name)
+    if not artist:
+        profile = profiles.normalize({**(payload.get("profile") or {}), **(payload or {}), "name": name})
+        artist = db.create_custom_artist(profile)
+    else:
+        patch = {k: v for k, v in (payload.get("profile") or payload).items() if k in profiles.normalize({})}
+        patch.pop("name", None)
+        if patch:
+            artist = db.update_custom_artist(artist["id"], patch) or artist
+
+    event_payload = payload.get("event") or {}
+    kind = event_payload.get("kind") or "custom"
+    date_str = event_payload.get("date") or date.today().isoformat()
+    event = profiles.make_event(
+        artist,
+        kind,
+        date_str,
+        title=event_payload.get("title", ""),
+        note=event_payload.get("note", ""),
+        years=int(event_payload.get("years") or 0),
+    )
+    seed = int(payload.get("seed") or (int(time.time() * 1000) % 99991))
+    project = db.create_project(artist["id"], event, seed)
     if payload.get("generate", True):
         project = apply_generation(project, section="all", seed=seed)
     return serialize_project(project)
@@ -300,14 +390,16 @@ def duplicate_project(pid: str):
 # generation                                                                  #
 # --------------------------------------------------------------------------- #
 def apply_generation(project: dict, section: str = "all", seed: int | None = None, overlay_text: str = "") -> dict:
-    artist = library.get_artist(project["artist_id"])
+    artist = resolve_artist(project["artist_id"])
     event = project.get("event") or {}
     seed = seed if seed is not None else project.get("seed", 1)
     patch: dict = {"seed": seed}
     article = None
+    # operator-typed names use the profile generator (it never invents facts)
+    gen = profiles if artist.get("custom") else content
 
     if section in ("article", "all"):
-        article = content.article_for(artist, event, seed)
+        article = gen.article_for(artist, event, seed)
         patch.update(
             {
                 "article_title": article["title"],
@@ -315,14 +407,14 @@ def apply_generation(project: dict, section: str = "all", seed: int | None = Non
                 "article_body": article["body"],
                 "first_comment": article["first_comment"],
                 "hashtags": " ".join(article["hashtags"]),
-                "music_links": artist["songs"],
+                "music_links": article.get("music_links") or artist.get("songs") or [],
             }
         )
         if project.get("status") in (None, "", "draft"):
             patch["status"] = "article"
 
     if section in ("script", "all"):
-        plan = content.script_for(artist, event, article, seed)
+        plan = gen.script_for(artist, event, article, seed)
         if overlay_text.strip():
             plan["overlay_text"] = overlay_text.strip()
             plan["overlay_words"] = content.word_count(overlay_text)
@@ -358,7 +450,7 @@ def generate(pid: str, payload: dict = Body(default={})):
 @app.get("/api/projects/{pid}/overlay-options")
 def overlay_options(pid: str):
     project = get_or_404(pid)
-    artist = library.get_artist(project["artist_id"])
+    artist = resolve_artist(project["artist_id"])
     event = project.get("event") or {}
     return {"options": content.overlay_variants(artist, event)}
 
@@ -449,7 +541,7 @@ def list_images(pid: str):
 @app.get("/api/projects/{pid}/images/suggest")
 def suggest_images(pid: str, limit: int = Query(default=20, ge=1, le=40)):
     project = get_or_404(pid)
-    artist = library.get_artist(project["artist_id"]) or {}
+    artist = resolve_artist(project["artist_id"])
     try:
         data = images_mod.suggest_for_artist(artist, limit=limit)
     except images_mod.ImageFetchError as exc:
@@ -494,7 +586,7 @@ def _meta_from(payload: dict, drop_url: bool = False) -> dict:
 def auto_images(pid: str, payload: dict = Body(default={})):
     """Fetch and store artist photos in one call (server-side download)."""
     project = get_or_404(pid)
-    artist = library.get_artist(project["artist_id"]) or {}
+    artist = resolve_artist(project["artist_id"])
     current = list(project.get("images") or [])
     remaining = MAX_IMAGES - len(current)
     if remaining <= 0:
@@ -580,7 +672,7 @@ def download_image(pid: str, image_id: str):
     path = os.path.join(DATA_DIR, image.get("file", ""))
     if not os.path.exists(path):
         raise HTTPException(404, "File ảnh không còn trên đĩa")
-    artist = library.get_artist(project["artist_id"]) or {}
+    artist = resolve_artist(project["artist_id"])
     slug = re.sub(r"[^a-z0-9]+", "-", (artist.get("id") or "artist").lower()).strip("-")
     index = (project.get("images") or []).index(image) + 1
     return FileResponse(path, media_type="image/jpeg", filename=f"{slug}-{index:02d}.jpg")
@@ -589,7 +681,7 @@ def download_image(pid: str, image_id: str):
 @app.get("/api/projects/{pid}/images.zip")
 def download_images_zip(pid: str):
     project = get_or_404(pid)
-    artist = library.get_artist(project["artist_id"]) or {}
+    artist = resolve_artist(project["artist_id"])
     slug = re.sub(r"[^a-z0-9]+", "-", (artist.get("id") or "artist").lower()).strip("-")
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
@@ -601,6 +693,187 @@ def download_images_zip(pid: str):
     buffer.seek(0)
     headers = {"Content-Disposition": f'attachment; filename="{slug}-images.zip"'}
     return Response(buffer.getvalue(), media_type="application/zip", headers=headers)
+
+
+# --------------------------------------------------------------------------- #
+# competitor reels: filter what already went viral, then remake it            #
+# --------------------------------------------------------------------------- #
+@app.get("/api/rivals")
+def list_rivals(
+    q: str = Query(default=""),
+    platform: str = Query(default=""),
+    fmt: str = Query(default=""),
+    status: str = Query(default=""),
+    sort: str = Query(default="score"),
+    min_score: int = Query(default=0, ge=0, le=100),
+    only_unused: bool = Query(default=False),
+):
+    items = [rivals_mod.with_score(r) for r in db.list_rivals()]
+    needle = q.strip().lower()
+    if needle:
+        items = [
+            r for r in items
+            if needle in (r.get("artist_name") or "").lower()
+            or needle in (r.get("hook") or "").lower()
+            or needle in (r.get("notes") or "").lower()
+        ]
+    if platform:
+        items = [r for r in items if r.get("platform") == platform]
+    if fmt:
+        items = [r for r in items if r.get("format") == fmt]
+    if status:
+        items = [r for r in items if r.get("status") == status]
+    if only_unused:
+        items = [r for r in items if not r.get("remade_project_id")]
+    items = [r for r in items if r["score"] >= min_score]
+
+    keys = {
+        "score": lambda r: (r["score"], r.get("views") or 0),
+        "views": lambda r: r.get("views") or 0,
+        "engagement": lambda r: r.get("engagement") or 0,
+        "recent": lambda r: r.get("created_at") or "",
+    }
+    items.sort(key=keys.get(sort, keys["score"]), reverse=True)
+    return {
+        "reels": items,
+        "count": len(items),
+        "platforms": rivals_mod.PLATFORMS,
+        "formats": rivals_mod.FORMATS,
+        "format_labels": rivals_mod.FORMAT_LABEL,
+        "platform_labels": rivals_mod.PLATFORM_LABEL,
+        "bulk_help": rivals_mod.BULK_HELP,
+    }
+
+
+@app.post("/api/rivals")
+def add_rivals(payload: dict = Body(...)):
+    items: list[dict] = []
+    if isinstance(payload.get("items"), list):
+        items = [i for i in payload["items"] if isinstance(i, dict)]
+    if payload.get("lines"):
+        items += rivals_mod.parse_bulk(payload["lines"])
+    if payload.get("url") or payload.get("hook"):
+        items.append({k: v for k, v in payload.items() if k not in ("lines", "items")})
+    if not items:
+        raise HTTPException(400, "Cần ít nhất một reel (lines, items hoặc url)")
+
+    created, errors = [], []
+    for item in items:
+        platform = (item.get("platform") or rivals_mod.platform_from_url(item.get("url", ""))).lower()
+        if platform not in rivals_mod.PLATFORMS:
+            platform = "facebook"
+        fmt = (item.get("format") or "story").lower()
+        if fmt not in rivals_mod.FORMATS:
+            fmt = "story"
+        record = {
+            "platform": platform,
+            "url": item.get("url", ""),
+            "artist_name": item.get("artist_name", ""),
+            "hook": item.get("hook", ""),
+            "views": rivals_mod.parse_number(item.get("views")),
+            "likes": rivals_mod.parse_number(item.get("likes")),
+            "comments": rivals_mod.parse_number(item.get("comments")),
+            "shares": rivals_mod.parse_number(item.get("shares")),
+            "format": fmt,
+            "notes": item.get("notes", ""),
+            "posted_at": item.get("posted_at", ""),
+        }
+        if not record["url"] and not record["hook"] and not record["artist_name"]:
+            errors.append("Bỏ qua một dòng vì thiếu cả link, hook và tên nghệ sĩ")
+            continue
+        created.append(rivals_mod.with_score(db.create_rival(record)))
+    return {"reels": created, "added": len(created), "errors": errors}
+
+
+@app.patch("/api/rivals/{rid}")
+def patch_rival(rid: str, payload: dict = Body(...)):
+    if not db.get_rival(rid):
+        raise HTTPException(404, "Không tìm thấy reel")
+    updated = db.update_rival(rid, payload)
+    return {"reel": rivals_mod.with_score(updated or {})}
+
+
+@app.delete("/api/rivals/{rid}")
+def remove_rival(rid: str):
+    if not db.delete_rival(rid):
+        raise HTTPException(404, "Không tìm thấy reel")
+    return {"ok": True}
+
+
+def _pick_library_event(artist: dict, ref: date) -> dict | None:
+    try:
+        events = library.artist_events(artist, ref, 365)
+    except Exception:  # noqa: BLE001 - a remake must never fail because of calendar math
+        return None
+    return events[0] if events else None
+
+
+def _remake_event(artist: dict, payload: dict, reel: dict) -> dict:
+    event_payload = payload.get("event") or {}
+    if event_payload.get("kind") and event_payload.get("date") and event_payload.get("years") is not None:
+        return event_payload
+    if artist.get("custom"):
+        return profiles.make_event(
+            artist,
+            event_payload.get("kind") or "custom",
+            event_payload.get("date") or date.today().isoformat(),
+            title=event_payload.get("title") or (reel.get("hook") or ""),
+            note=event_payload.get("note", ""),
+            years=int(event_payload.get("years") or 0),
+        )
+    event = _pick_library_event(artist, date.today())
+    if event:
+        return event
+    return profiles.make_event(
+        artist,
+        "custom",
+        date.today().isoformat(),
+        title=event_payload.get("title") or (reel.get("hook") or f"{artist.get('name', '')} — remake"),
+        note=event_payload.get("note", ""),
+    )
+
+
+@app.post("/api/rivals/{rid}/remake")
+def remake_rival(rid: str, payload: dict = Body(default={})):
+    """Turn a winning competitor reel into a new project with the same structure."""
+    reel = db.get_rival(rid)
+    if not reel:
+        raise HTTPException(404, "Không tìm thấy reel")
+    scored = rivals_mod.with_score(reel)
+
+    artist_id = (payload.get("artist_id") or "").strip()
+    artist = resolve_artist(artist_id) if artist_id else {}
+    if not artist:
+        name = (payload.get("artist_name") or reel.get("artist_name") or "").strip()
+        if not name:
+            raise HTTPException(400, "Chọn nghệ sĩ hoặc nhập tên nhân vật để làm lại")
+        artist = library.get_artist(name.lower().replace(" ", "-")) or db.find_custom_artist(name) or {}
+        if not artist:
+            artist = db.create_custom_artist(profiles.normalize({"name": name}))
+
+    event = _remake_event(artist, payload, reel)
+    seed = int(payload.get("seed") or (int(time.time() * 1000) % 99991))
+    project = db.create_project(artist["id"], event, seed)
+    remake = {
+        "rival_id": rid,
+        "platform": reel.get("platform", ""),
+        "platform_label": rivals_mod.PLATFORM_LABEL.get(reel.get("platform", ""), ""),
+        "url": reel.get("url", ""),
+        "hook": reel.get("hook", ""),
+        "artist_name": reel.get("artist_name", ""),
+        "views": reel.get("views") or 0,
+        "score": scored["score"],
+        "tier": scored["tier"],
+        "format": reel.get("format", ""),
+        "format_label": rivals_mod.FORMAT_LABEL.get(reel.get("format", ""), ""),
+        "brief": scored["brief"],
+        "remade_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+    }
+    project = db.update_project(project["id"], {"remake": remake})
+    if payload.get("generate", True):
+        project = apply_generation(project, section="all", seed=seed)
+    db.update_rival(rid, {"status": "remaking", "remade_project_id": project["id"]})
+    return {"project": serialize_project(project), "reel": rivals_mod.with_score(db.get_rival(rid) or {})}
 
 
 # --------------------------------------------------------------------------- #
@@ -670,7 +943,7 @@ def delete_voice(pid: str):
 @app.get("/api/projects/{pid}/export")
 def export_project(pid: str, fmt: str = "md"):
     project = get_or_404(pid)
-    artist = library.get_artist(project["artist_id"])
+    artist = resolve_artist(project["artist_id"])
     event = project.get("event") or {}
     payload = content.build_package(project, artist, event)
     if fmt == "json":
@@ -682,7 +955,7 @@ def export_project(pid: str, fmt: str = "md"):
 def download_bundle(pid: str):
     """Everything about one project in a single file the user can save locally."""
     project = get_or_404(pid)
-    artist = library.get_artist(project["artist_id"]) or {}
+    artist = resolve_artist(project["artist_id"])
     event = project.get("event") or {}
     slug = re.sub(r"[^a-z0-9]+", "-", (artist.get("id") or "artist").lower()).strip("-")
     package = content.build_package(project, artist, event)

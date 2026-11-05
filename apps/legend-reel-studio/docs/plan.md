@@ -75,7 +75,7 @@ apps/legend-reel-studio/
 
 ## Data model
 
-`projects`
+`projects` (thêm cột `remake_json`: reel gốc + brief khi dự án được tạo từ “Làm lại”)
 
 | Cột | Kiểu | Ý nghĩa |
 | --- | --- | --- |
@@ -100,6 +100,10 @@ apps/legend-reel-studio/
 `Voice`: `file`, `engine`, `voice`, `ext`, `bytes`, `duration`, `text`, `created_at`.
 
 `custom_events`: id, artist_id, date, kind, title, note, created_at.
+
+`custom_artists` (profile tạo bằng tên): id, name, data_json (aka, genre, era, hometown, birth, death, gender, source_url, songs, facts), created_at, updated_at. `library.get_artist` không thấy id thì `resolve_artist()` rơi xuống bảng này, nên mọi endpoint dự án dùng chung một đường.
+
+`rival_reels` (reel đối thủ): id, url, platform, fmt, artist_name, hook, views, likes, comments, shares, posted_at, score, tier, status (moi/dang-lam/da-lam), remade_project_id, note, created_at, updated_at. Điểm không lưu cứng khi đọc — `with_score()` tính lại theo ngày hôm nay để độ mới luôn đúng.
 
 **Migration**: `init_db()` tạo bảng nếu thiếu, `ALTER TABLE` thêm `images_json`, `script_json`, `voice_json` cho DB cũ, và đổi `status='video'` → `'script'`. Cột cũ (`render_path`, `audio_path`, `video_plan_json`…) bị bỏ qua khi đọc.
 
@@ -127,6 +131,14 @@ PATCH  /api/projects/{id}/images/{image_id} {is_banner}
 DELETE /api/projects/{id}/images/{image_id}
 GET    /api/projects/{id}/images/{image_id}/download
 GET    /api/projects/{id}/images.zip        → ảnh + ATTRIBUTION.txt
+GET    /api/artists/custom                  → profile tạo bằng tên
+POST   /api/artists/custom                  {name, aka, genre, era, hometown, birth, death, gender, source_url, songs, facts}
+PATCH/DELETE /api/artists/custom/{id}       xoá bị chặn 400 khi còn dự án
+POST   /api/projects/custom                 {name, profile?, event?, seed?, generate?} → project
+GET    /api/rivals?q=&platform=&fmt=&status=&sort=&min_score=&only_unused=
+POST   /api/rivals                          {lines?} | {items?} | {url, ...} → {reels, added, errors}
+PATCH/DELETE /api/rivals/{id}
+POST   /api/rivals/{id}/remake              {artist_id?|artist_name?, event?, seed?, generate?} → {project, reel}
 GET    /api/voices
 POST   /api/projects/{id}/voice             {text, voice}
 DELETE /api/projects/{id}/voice
@@ -163,6 +175,27 @@ import_from_url(url, meta) → http_bytes (≤15MB, timeout 15s)
  └─ lưu data/images/<pid>/<image_id>.jpg + record license/attribution
 
 GET /images.zip → zipfile gồm ảnh JPEG + ATTRIBUTION.txt
+```
+
+## Rivals pipeline
+
+```text
+parse_bulk(lines) → items
+score_reel(item)  → score 0–100, tier, engagement, reach/engagement/recency points, verdict
+brief(fmt)        → hook_pattern, beats[5], pacing, why_it_worked, remake_rules
+POST /api/rivals/{id}/remake → artist (library | custom | mới từ tên | không) → event → apply_generation
+                             → project["remake"] = {rival_id, url, hook, score, tier, brief, remade_at}
+```
+
+Điểm = độ phủ (log10 views, ≤50) + tương tác (ER%, ≤40) + độ mới (≤10). Brief chỉ mô tả **cấu trúc**; bản làm lại sinh chữ mới và dùng ảnh Wikipedia/Commons nên không tái sử dụng tài sản của đối thủ.
+
+## Name-based profile pipeline
+
+```text
+profiles.normalize(name) → profile tối thiểu (không bịa ngày sinh/năm mất)
+profiles.make_event(profile, kind, date) → event có label_vi, years (0 nếu thiếu dữ liệu → câu văn tránh in “0 years”)
+profiles.article_for / script_for / hashtags / first_comment / fb_hook / caption
+profiles.song_links(profile) → YouTube search URL (không bịa video id)
 ```
 
 ## Voice pipeline

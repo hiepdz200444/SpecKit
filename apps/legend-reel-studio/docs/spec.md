@@ -1,13 +1,13 @@
 # Feature Specification: Legends Reel Studio (v2 — không dựng video)
 
 **Feature Branch**: `arena/19d0d9ca-speckit`
-**Created**: 2026-11-04 · **Revised**: 2026-11-04 (bỏ hẳn phần dựng video)
+**Created**: 2026-11-04 · **Revised**: 2026-11-05 (thêm reel đối thủ + bài viết theo tên nhân vật)
 **Status**: Implemented (prototype)
 **Input**: "Trang quản lý, cập nhật nội dung reels Facebook cho thị trường Mỹ, chủ đề âm nhạc của các cố nghệ sĩ mà khán giả 30–60 tuổi hâm mộ. Tìm sự kiện trong ngày + bài nhạc liên quan; viết bài báo tiếng Anh 700–900 từ kèm link nhạc; gom 1 ảnh banner + 20 ảnh nghệ sĩ từ Wikipedia/Commons (có license) hoặc từ link người dùng dán vào; sinh chữ trên video 9–15 từ, hook Facebook, caption + comment pin; tạo voice tiếng Anh để nghe thử và tải .mp3. Không dựng video."
 
 ## Phạm vi
 
-**Trong phạm vi**: tìm sự kiện, thư viện nghệ sĩ, bài báo, bộ ảnh nghệ sĩ + banner, text đăng bài, voice TTS, quản lý dự án, xuất markdown/JSON.
+**Trong phạm vi**: tìm sự kiện, thư viện nghệ sĩ, bài báo, bộ ảnh nghệ sĩ + banner, text đăng bài, voice TTS, quản lý dự án, xuất markdown/JSON, **theo dõi reel đối thủ đã nổi + làm lại**, **tạo bài viết bằng tên nhân vật bất kỳ**.
 
 **Ngoài phạm vi (đã bỏ hẳn)**: render MP4, ffmpeg/imageio-ffmpeg, tổng hợp nhạc nền, preview điện thoại 9:16, job render + polling tiến độ, mọi nút render/tải MP4. Studio không tạo video.
 
@@ -117,6 +117,44 @@ Người dùng xem toàn bộ dự án, lọc theo trạng thái, tìm kiếm, m
 
 ## Requirements *(mandatory)*
 
+### User Story 5 - Lọc reel đối thủ đã nổi rồi làm lại (Priority: P1)
+
+Người vận hành thấy một reel cùng ngách đang ăn view. Họ dán link + số liệu vào studio, studio chấm điểm "đã nổi", xếp hạng, lọc theo nền tảng/format/điểm, mở brief cấu trúc (mẫu hook, 5 nhịp, nhịp độ, lý do ăn view) rồi bấm **Làm lại** để có dự án mới cùng pipeline — nhưng bằng chữ của mình và ảnh có license.
+
+**Why this priority**: Học cấu trúc từ cái đã thắng là cách nhanh nhất để lên view, mà vẫn không đụng bản quyền của đối thủ.
+
+**Independent Test**: Nhập 2 reel (TikTok 1.2M view, Instagram 320k) → bảng xếp hạng hiện điểm/nhãn; lọc `instagram` còn 1 card; mở brief thấy 5 nhịp; bấm "Làm lại" → dự án mới, đầu trang Studio có banner "Làm lại từ reel đối thủ", brief nằm trong `article.md` và `bundle.zip`.
+
+**Acceptance Scenarios**:
+
+1. **Given** chuỗi số viết kiểu `1.2M`, `84k`, `2.1 nghìn`, `1.5 triệu`, `1,234`, **When** nhập reel, **Then** mọi giá trị được parse đúng (view/like/comment/share).
+2. **Given** reel đã nhập, **When** xem danh sách, **Then** mỗi reel có điểm 0–100 + nhãn (`Đột phá / Nổi / Khá / Mới`), tách rõ điểm độ phủ, tương tác và độ mới.
+3. **Given** bộ lọc, **When** chọn nền tảng/format/điểm tối thiểu/"chưa làm lại"/sắp xếp, **Then** danh sách lọc và sắp đúng.
+4. **Given** một reel, **When** bấm "Làm lại" và chọn nghệ sĩ trong thư viện — hoặc gõ tên mới — hoặc để trống, **Then** tạo dự án mới với bài 700–900 từ và reel được đánh dấu đang làm lại, có `remade_project_id`.
+5. **Given** dự án đã làm lại, **When** mở xuất `.md`/`bundle.zip`, **Then** có mục "Remake brief" ghi reel gốc + cấu trúc cần giữ.
+6. **Given** yêu cầu bản quyền, **When** làm lại, **Then** studio KHÔNG tải video/audio/ảnh của đối thủ và KHÔNG copy chữ của họ.
+
+---
+
+### User Story 6 - Tạo bài viết bằng tên nhân vật (Priority: P2)
+
+Người vận hành muốn viết về một người không có trong thư viện 27 nghệ sĩ. Họ gõ tên vào ô "Tạo bài viết bằng tên nhân vật" ở Khám phá, có thể thêm chi tiết (nghệ danh, thể loại, quê quán, năm sinh/mất, bài hát, ghi chú), bấm một nút và nhận dự án đầy đủ.
+
+**Why this priority**: Mở rộng nội dung ra ngoài 27 người mà không phải sửa code, không cần LLM.
+
+**Independent Test**: Gõ "Michael Jackson", thêm thể loại + 2 bài hát → dự án mới có 700–900 từ, tiêu đề, chữ trên video 9–15 từ, hook, caption, hashtag, comment pin, voice script; gõ lại đúng tên đó → dùng lại profile, không tạo trùng.
+
+**Acceptance Scenarios**:
+
+1. **Given** chỉ có tên, **When** tạo, **Then** bài vẫn 700–900 từ và không in số liệu bịa (không "0 years", không tuổi sai).
+2. **Given** có thêm chi tiết, **When** tạo, **Then** bài nhắc đúng nghệ danh/thể loại/quê quán/bài hát/ghi chú đã nhập.
+3. **Given** bài hát không có mã video, **When** xem link nhạc, **Then** link là YouTube *search* (không phải video id bịa).
+4. **Given** giới tính được chọn, **When** sinh bài, **Then** đại từ đúng (he/his hoặc she/her).
+5. **Given** tên trống, **When** bấm tạo, **Then** API trả 400 với thông báo tiếng Việt.
+6. **Given** profile đang có dự án, **When** xoá profile, **Then** API chặn bằng 400.
+
+---
+
 ### Functional Requirements
 
 - **FR-001**: Hệ thống PHẢI có thư viện nghệ sĩ đã mất, mỗi nghệ sĩ gồm ngày sinh, ngày mất, quê quán, thể loại, thời kỳ, 3 bài hát kèm năm và link nghe, 3–4 dữ kiện có thật.
@@ -134,7 +172,7 @@ Người dùng xem toàn bộ dự án, lọc theo trạng thái, tìm kiếm, m
 - **FR-013**: Hệ thống PHẢI quản lý dự án: danh sách, lọc trạng thái, tìm kiếm, cập nhật, nhân bản, xoá, xuất markdown/JSON.
 - **FR-014**: Hệ thống PHẢI giữ trạng thái dự án theo luồng Nháp → Đã có bài báo → Đã có text & voice → Sẵn sàng đăng → Đã lên lịch → Đã đăng.
 - **FR-015**: Hệ thống KHÔNG được chứa render video, ffmpeg, job render hay nút tải MP4.
-- **FR-016**: Sidebar PHẢI điều hướng được cả 4 màn hình và render lại khi bấm lại mục đang mở.
+- **FR-016**: Sidebar PHẢI điều hướng được cả 5 màn hình (Khám phá, Dự án, Reels đối thủ, Cách hoạt động, …) và render lại khi bấm lại mục đang mở.
 - **FR-017**: Hệ thống PHẢI chạy offline (trừ hai tính năng cần mạng: lấy ảnh và edge-tts), không phụ thuộc LLM hay API trả phí.
 - **FR-018**: Giao diện PHẢI là tiếng Việt, nội dung xuất bản là tiếng Anh (thị trường Mỹ).
 - **FR-023**: Đổi giọng đọc PHẢI tạo file voice mới (tên khác) và trả URL mới, phục vụ với `Cache-Control: no-store`, để trình duyệt không phát lại bản ghi cũ.
@@ -143,6 +181,11 @@ Người dùng xem toàn bộ dự án, lọc theo trạng thái, tìm kiếm, m
 - **FR-019**: Nút “Tự động lấy 20 ảnh” PHẢI lấy và lưu ảnh trong một lần bấm (`POST /images/auto`); khi máy chủ không có Internet, studio PHẢI tự chuyển sang tải ảnh bằng trình duyệt và upload qua `data_url`, kèm tiến trình “Đang tải i/n”.
 - **FR-021**: Studio PHẢI có nút “Tải về máy” xuất một `.zip` gồm `article.md`, `project.json`, ảnh JPEG + `ATTRIBUTION.txt`, voice và `HUONG-DAN.txt`.
 - **FR-022**: UI PHẢI có công cụ “Kiểm tra mạng” gọi thử Wikipedia/Commons từ trình duyệt và gửi kết quả về `POST /api/client-log` để chẩn đoán khi máy chủ bị chặn mạng.
+- **FR-026**: Hệ thống PHẢI cho nhập reel đối thủ bằng dán tay (`url | nền tảng | views | likes | comments | shares | nghệ sĩ | hook | format`), hiểu số viết tắt `1.2M`, `84k`, `2.1 nghìn`, `1.5 triệu`, `1,234`; KHÔNG scrape Facebook/Instagram/TikTok.
+- **FR-027**: Mỗi reel PHẢI được chấm điểm "đã nổi" 0–100 (độ phủ ≤50 + tương tác ≤40 + độ mới ≤10) kèm nhãn, và PHẢI lọc/sắp xếp được theo điểm, view, tương tác, mới nhất, nền tảng, format, trạng thái, "chưa làm lại".
+- **FR-028**: Mỗi reel PHẢI có brief làm lại: mẫu hook theo format, timeline từng nhịp, nhịp độ, lý do reel ăn view, quy tắc làm lại.
+- **FR-029**: PHẢI làm lại reel bằng một nút: tạo dự án mới qua đúng pipeline (bài 700–900 từ, ảnh có license, text & voice), gắn brief vào dự án và vào `article.md`/`bundle.zip`, đánh dấu reel đang làm lại. Bản làm lại PHẢI dùng chữ do studio sinh và ảnh có license — KHÔNG dùng video/audio/ảnh/chữ của đối thủ.
+- **FR-030**: PHẢI tạo được bài viết từ tên nhân vật bất kỳ (`POST /api/projects/custom`), có trường tuỳ chọn (nghệ danh, thể loại, giai đoạn, quê quán, năm sinh/mất, giọng, link nguồn, bài hát, ghi chú); profile lưu lại để tái dùng, không tạo trùng, xoá được khi chưa có dự án; link nhạc cho profile tự tạo PHẢI là link tìm kiếm.
 - **FR-020**: Sau khi lấy ảnh, người dùng PHẢI tải được ảnh về máy: từng ảnh qua nút “Tải về”, cả bộ qua `images.zip` (JPEG + `ATTRIBUTION.txt`).
 
 ### Key Entities
@@ -154,6 +197,8 @@ Người dùng xem toàn bộ dự án, lọc theo trạng thái, tìm kiếm, m
 - **Script**: text đăng bài — chữ trên video, số từ, hook, caption, hashtag, comment pin, "voice_script" gợi ý.
 - **Voice**: voiceover — file, engine (edge-tts/pyttsx3/…), giọng, định dạng, dung lượng, thời lượng, text nguồn.
 - **Custom Event**: sự kiện người dùng thêm — nghệ sĩ, ngày, tiêu đề, ghi chú.
+- **Custom Artist**: profile tạo từ tên — tên, nghệ danh, thể loại, giai đoạn, quê quán, năm sinh/mất, giọng, link nguồn, bài hát, ghi chú.
+- **Rival Reel**: reel đối thủ — url, nền tảng, format, views/likes/comments/shares, nghệ sĩ, hook, ngày đăng, điểm + tier, trạng thái (mới/đang làm/đã làm), `remade_project_id`, ghi chú.
 
 ## Success Criteria *(mandatory)*
 
@@ -164,6 +209,8 @@ Người dùng xem toàn bộ dự án, lọc theo trạng thái, tìm kiếm, m
 - **SC-005**: 100% ảnh lưu vào dự án có trường giấy phép (kể cả giá trị "không rõ") và nguồn; file `.zip` luôn kèm `ATTRIBUTION.txt`.
 - **SC-006**: Voice tạo được bằng ít nhất một engine khi máy có mạng **hoặc** pyttsx3; khi không có engine, lỗi trả về đọc được bằng tiếng Việt.
 - **SC-007**: Sidebar mở đúng 4 màn hình; bấm lại mục đang mở vẫn render (kiểm tra bằng jsdom).
+- **SC-009**: 100% reel nhập vào có điểm 0–100 và brief đủ 5 nhịp; mọi bản làm lại nằm trong 700–900 từ và mở được từ Studio về reel gốc.
+- **SC-010**: Tạo bài từ tên nhân vật chỉ cần 1 ô nhập + 1 cú bấm; 100% bài sinh ra (kể cả chỉ có tên) nằm trong 700–900 từ và không chứa số liệu bịa.
 - **SC-008**: Người vận hành có thể chỉnh sửa và lưu lại bài báo/text mà không mất dữ liệu khi chuyển tab hoặc tải lại trang.
 
 ## Assumptions
@@ -171,5 +218,6 @@ Người dùng xem toàn bộ dự án, lọc theo trạng thái, tìm kiếm, m
 - Nội dung xuất bản bằng tiếng Anh cho khán giả Mỹ; giao diện vận hành tiếng Việt.
 - Người dùng tự chịu trách nhiệm về quyền sử dụng ảnh và bản nhạc.
 - Studio không dựng video và chưa tích hợp đăng bài qua Facebook Graph API.
-- Thư viện nghệ sĩ là dữ liệu tuyển chọn (27 nghệ sĩ), mở rộng bằng cách sửa `seed_artists.py`.
+- Thư viện nghệ sĩ là dữ liệu tuyển chọn (27 nghệ sĩ), mở rộng bằng cách sửa `seed_artists.py` hoặc tạo profile bằng tên.
+- Số liệu reel đối thủ do người dùng tự nhập (xem trên app) — studio không cào dữ liệu nền tảng.
 - edge-tts cần internet; pyttsx3 cần giọng hệ thống (SAPI5/say/espeak).

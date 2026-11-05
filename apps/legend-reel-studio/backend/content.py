@@ -645,4 +645,24 @@ def _article_markdown(project: dict, artist: dict) -> str:
     voice = project.get("voice") or {}
     if voice.get("url"):
         parts += ["", f"Voiceover: {voice.get('voice', '')} ({voice.get('engine', '')}) — {voice.get('url', '')}"]
+    remake = project.get("remake") or {}
+    if remake:
+        brief = remake.get("brief") or {}
+        parts += [
+            "",
+            "## Remake brief (from a competitor reel)",
+            "",
+            f"- Nguồn: {remake.get('platform_label') or remake.get('platform', '')} — {remake.get('url', '')}",
+            f"- Điểm nổi bật: {remake.get('score', '')}/100 ({remake.get('tier', '')})",
+            f"- Định dạng: {remake.get('format_label') or remake.get('format', '')}",
+            f"- Hook gốc: {remake.get('hook', '')}",
+            "",
+            "### Cấu trúc cần giữ",
+            "",
+            *[f"- {beat}" for beat in brief.get("beats", [])],
+            "",
+            "### Nguyên tắc làm lại",
+            "",
+            *[f"- {rule}" for rule in brief.get("remake_rules", [])],
+        ]
     return "\n".join(parts)

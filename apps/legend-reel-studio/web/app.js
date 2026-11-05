@@ -54,6 +54,8 @@
     browserOnly: false,
     zipHint: false,
     saving: null,
+    rivalFilters: { q: "", platform: "", sort: "score", onlyUnused: false },
+    rivalReels: [],
   };
 
   // ------------------------------------------------------------------ api
@@ -175,9 +177,9 @@
   }
 
   // ------------------------------------------------------------------ routing
-  const NAV_HASH = { dashboard: "#/", discover: "#/discover", projects: "#/projects", howto: "#/howto" };
-  const ROUTE_NAME = { dashboard: "Tổng quan", discover: "Khám phá sự kiện", projects: "Dự án reels", project: "Studio", howto: "Cách hoạt động" };
-  const ROUTES = { "": "dashboard", "#/": "dashboard", "#/discover": "discover", "#/projects": "projects", "#/howto": "howto" };
+  const NAV_HASH = { dashboard: "#/", discover: "#/discover", projects: "#/projects", rivals: "#/rivals", howto: "#/howto" };
+  const ROUTE_NAME = { dashboard: "Tổng quan", discover: "Khám phá sự kiện", projects: "Dự án reels", rivals: "Reels đối thủ", project: "Studio", howto: "Cách hoạt động" };
+  const ROUTES = { "": "dashboard", "#/": "dashboard", "#/discover": "discover", "#/projects": "projects", "#/rivals": "rivals", "#/howto": "howto" };
 
   function parseHash() {
     const hash = location.hash || "#/";
@@ -205,6 +207,7 @@
       if (state.route.name === "dashboard") await viewDashboard();
       else if (state.route.name === "discover") await viewDiscover();
       else if (state.route.name === "projects") await viewProjects();
+      else if (state.route.name === "rivals") await viewRivals();
       else if (state.route.name === "project") await viewProject(state.route.id);
       else viewHowto();
     } catch (err) {
@@ -434,6 +437,62 @@
   async function viewDiscover() {
     const f = state.filters;
     $("#view").innerHTML = `
+      <div class="panel" style="margin-bottom:18px">
+        <div class="panel-head">
+          <h3>Tạo bài viết bằng tên nhân vật</h3>
+          <span class="tiny muted">Không cần có trong thư viện 27 nghệ sĩ</span>
+        </div>
+        <div class="panel-body">
+          <div class="row" style="gap:10px;flex-wrap:wrap;align-items:flex-end">
+            <div class="field" style="flex:2;min-width:230px;margin:0">
+              <label>Tên nhân vật / nghệ sĩ</label>
+              <input class="input" id="cust-name" placeholder="VD: Michael Jackson, Selena, Charlie Chaplin…" />
+            </div>
+            <div class="field" style="min-width:160px;margin:0">
+              <label>Dịp</label>
+              <select class="select" id="cust-kind">
+                <option value="birthday">Sinh nhật</option>
+                <option value="memorial">Ngày mất</option>
+                <option value="release">Kỷ niệm phát hành</option>
+                <option value="custom">Sự kiện tự nhập</option>
+              </select>
+            </div>
+            <div class="field" style="min-width:150px;margin:0">
+              <label>Ngày</label>
+              <input type="date" class="input" id="cust-date" value="${esc(isoToday())}" />
+            </div>
+            <button class="btn btn-primary" id="cust-create">${ICON.spark} Tạo bài viết</button>
+          </div>
+          <details style="margin-top:12px">
+            <summary class="tiny muted" style="cursor:pointer">Thêm chi tiết để bài viết cụ thể hơn (tuỳ chọn)</summary>
+            <div class="row" style="gap:10px;flex-wrap:wrap;margin-top:10px">
+              <div class="field" style="min-width:180px;margin:0"><label>Nghệ danh</label><input class="input" id="cust-aka" placeholder="The King of Pop" /></div>
+              <div class="field" style="min-width:150px;margin:0"><label>Thể loại</label><input class="input" id="cust-genre" placeholder="Pop / Soul" /></div>
+              <div class="field" style="min-width:140px;margin:0"><label>Giai đoạn</label><input class="input" id="cust-era" placeholder="1970s-2000s" /></div>
+              <div class="field" style="min-width:160px;margin:0"><label>Quê quán</label><input class="input" id="cust-hometown" placeholder="Gary, Indiana" /></div>
+              <div class="field" style="min-width:120px;margin:0"><label>Năm sinh</label><input class="input" id="cust-birth" placeholder="1958" /></div>
+              <div class="field" style="min-width:120px;margin:0"><label>Năm mất</label><input class="input" id="cust-death" placeholder="2009" /></div>
+              <div class="field" style="min-width:150px;margin:0">
+                <label>Giọng</label>
+                <select class="select" id="cust-gender"><option value="">Không rõ</option><option value="male">Nam (he/his)</option><option value="female">Nữ (she/her)</option></select>
+              </div>
+              <div class="field" style="min-width:170px;margin:0"><label>Link nguồn</label><input class="input" id="cust-source" placeholder="https://en.wikipedia.org/wiki/…" /></div>
+            </div>
+            <div class="field" style="margin-top:10px">
+              <label>Bài hát nổi bật <span class="hint">mỗi dòng: Tên bài | năm</span></label>
+              <textarea class="textarea" id="cust-songs" style="min-height:74px" placeholder="Thriller | 1982&#10;Billie Jean | 1983"></textarea>
+            </div>
+            <div class="field">
+              <label>Sự thật / ghi chú <span class="hint">mỗi dòng một ý — studio chỉ dùng những gì bạn nhập, không tự bịa</span></label>
+              <textarea class="textarea" id="cust-facts" style="min-height:74px" placeholder="Anh ấy thu âm Thriller trong 8 tuần."></textarea>
+            </div>
+            <div class="field">
+              <label>Tiêu đề sự kiện / ghi chú <span class="hint">cho “kỷ niệm phát hành” hoặc “tự nhập”</span></label>
+              <input class="input" id="cust-title" placeholder="VD: the 'Thriller' video premiere" />
+            </div>
+          </details>
+        </div>
+      </div>
       <div class="toolbar">
         <div class="search">
           ${ICON.search}
@@ -478,6 +537,45 @@
         results.innerHTML = `<div class="empty"><h3>Lỗi tải sự kiện</h3><p>${esc(err.message)}</p></div>`;
       }
     };
+
+    const createBtn = $("#cust-create");
+    if (createBtn) {
+      createBtn.onclick = async () => {
+        const name = ($("#cust-name").value || "").trim();
+        if (!name) return toast("Nhập tên nhân vật trước", "err");
+        const lines = (el) => (($(el).value || "").split(/\n+/).map((x) => x.trim()).filter(Boolean));
+        const songs = lines("#cust-songs").map((line) => {
+          const [title, year] = line.split("|");
+          return { title: (title || "").trim(), year: (year || "").trim() };
+        }).filter((s) => s.title);
+        const profile = {
+          aka: $("#cust-aka").value.trim(),
+          genre: $("#cust-genre").value.trim(),
+          era: $("#cust-era").value.trim(),
+          hometown: $("#cust-hometown").value.trim(),
+          birth: $("#cust-birth").value.trim(),
+          death: $("#cust-death").value.trim(),
+          gender: $("#cust-gender").value,
+          source_url: $("#cust-source").value.trim(),
+          songs,
+          facts: lines("#cust-facts"),
+        };
+        const kind = $("#cust-kind").value;
+        const event = { kind, date: $("#cust-date").value || isoToday(), title: $("#cust-title").value.trim() };
+        createBtn.disabled = true;
+        createBtn.innerHTML = "Đang viết bài…";
+        try {
+          const project = await api("/api/projects/custom", { method: "POST", body: { name, profile, event } });
+          toast(`Đã tạo bài ${project.article_words} từ cho ${name}`, "ok");
+          await boot();
+          location.hash = `#/project/${project.id}`;
+        } catch (err) {
+          toast(err.message, "err");
+          createBtn.disabled = false;
+          createBtn.innerHTML = `${ICON.spark} Tạo bài viết`;
+        }
+      };
+    }
 
     let debounce = null;
     $("#q").addEventListener("input", (e) => {
@@ -541,6 +639,306 @@
     render();
   }
 
+  // ------------------------------------------------------------------ rivals
+  const PLATFORM_ICON = {
+    facebook: "Facebook",
+    instagram: "Instagram",
+    tiktok: "TikTok",
+    youtube: "YouTube",
+  };
+
+  function tierClass(score) {
+    if (score >= 80) return "tier-hot";
+    if (score >= 65) return "tier-good";
+    if (score >= 50) return "tier-mid";
+    return "tier-low";
+  }
+
+  const fmtNum = (n) => {
+    const value = Number(n || 0);
+    if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(value >= 10_000_000 ? 0 : 1)}M`;
+    if (value >= 1_000) return `${(value / 1_000).toFixed(value >= 10_000 ? 0 : 1)}k`;
+    return String(value);
+  };
+
+  async function viewRivals() {
+    const f = state.rivalFilters;
+    const platforms = state.boot?.rivals?.platforms || ["facebook", "instagram", "tiktok", "youtube"];
+    $("#view").innerHTML = `
+      <div class="toolbar">
+        <div class="search">
+          ${ICON.search}
+          <input class="input" id="rq" placeholder="Tìm nghệ sĩ, hook, ghi chú…" value="${esc(f.q)}" />
+        </div>
+        <select class="select" id="rplatform" style="max-width:170px">
+          <option value="">Mọi nền tảng</option>
+          ${platforms.map((p) => `<option value="${esc(p)}" ${f.platform === p ? "selected" : ""}>${esc(PLATFORM_ICON[p] || p)}</option>`).join("")}
+        </select>
+        <select class="select" id="rsort" style="max-width:190px">
+          <option value="score" ${f.sort === "score" ? "selected" : ""}>Sắp theo điểm nổi bật</option>
+          <option value="views" ${f.sort === "views" ? "selected" : ""}>Nhiều views nhất</option>
+          <option value="engagement" ${f.sort === "engagement" ? "selected" : ""}>Tương tác cao nhất</option>
+          <option value="recent" ${f.sort === "recent" ? "selected" : ""}>Mới nhập gần đây</option>
+        </select>
+        <label class="chip ${f.onlyUnused ? "active" : ""}" id="runused" style="cursor:pointer">Chỉ reel chưa làm lại</label>
+        <div class="spacer"></div>
+        <button class="btn btn-sm btn-primary" id="btn-rimport">${ICON.plus} Nhập reel đối thủ</button>
+      </div>
+      <div id="rimport-panel"></div>
+      <div id="rlist"><div class="skeleton" style="height:180px"></div></div>`;
+
+    const load = async () => {
+      const list = $("#rlist");
+      list.innerHTML = `<div class="skeleton" style="height:180px"></div>`;
+      const params = new URLSearchParams({ q: f.q, platform: f.platform, sort: f.sort, only_unused: String(f.onlyUnused) });
+      try {
+        const data = await api(`/api/rivals?${params}`);
+        state.rivalReels = data.reels || [];
+        const navCount = $("#nav-rival-count");
+        if (navCount) navCount.textContent = data.count ?? state.rivalReels.length;
+        if (!state.rivalReels.length) {
+          list.innerHTML = `
+            <div class="empty">
+              <h3>Chưa có reel nào</h3>
+              <p>Dán link reel đối thủ kèm số liệu bạn nhìn thấy (views / likes / comment / share). Studio không scrape Facebook, Instagram hay TikTok.</p>
+              <button class="btn btn-primary" id="empty-import">${ICON.plus} Nhập reel đầu tiên</button>
+            </div>`;
+          const emptyBtn = $("#empty-import");
+          if (emptyBtn) emptyBtn.onclick = () => openImportRivals(load);
+          return;
+        }
+        const hot = state.rivalReels.filter((r) => r.score >= 65).length;
+        list.innerHTML = `
+          <div class="section-head">
+            <h2>${state.rivalReels.length} reel</h2>
+            <p>${hot} reel đạt từ 65 điểm · điểm = độ phủ + tỉ lệ tương tác + độ mới</p>
+          </div>
+          <div class="rival-list">${state.rivalReels.map(rivalCard).join("")}</div>`;
+        bindRivalList(load);
+      } catch (err) {
+        list.innerHTML = `<div class="empty"><h3>Không tải được danh sách</h3><p>${esc(err.message)}</p></div>`;
+      }
+    };
+
+    let debounce = null;
+    $("#rq").addEventListener("input", (e) => {
+      f.q = e.target.value;
+      clearTimeout(debounce);
+      debounce = setTimeout(load, 260);
+    });
+    $("#rplatform").addEventListener("change", (e) => { f.platform = e.target.value; load(); });
+    $("#rsort").addEventListener("change", (e) => { f.sort = e.target.value; load(); });
+    $("#runused").addEventListener("click", () => {
+      f.onlyUnused = !f.onlyUnused;
+      $("#runused").classList.toggle("active", f.onlyUnused);
+      load();
+    });
+    $("#btn-rimport").onclick = () => openImportRivals(load);
+    await load();
+  }
+
+  function rivalCard(reel) {
+    const metrics = [
+      `${fmtNum(reel.views)} views`,
+      `${fmtNum(reel.likes)} like`,
+      `${fmtNum(reel.comments)} cmt`,
+      `${fmtNum(reel.shares)} share`,
+      `ER ${reel.engagement}%`,
+    ];
+    const brief = reel.brief || {};
+    return `
+      <article class="rival-card" data-reel="${esc(reel.id)}">
+        <div class="rival-score ${tierClass(reel.score)}">
+          <b>${esc(reel.score)}</b>
+          <span>${esc(reel.tier)}</span>
+        </div>
+        <div class="rival-body">
+          <div class="rival-top">
+            <span class="tag">${esc(reel.platform_label || reel.platform)}</span>
+            <span class="tag">${esc(reel.format_label || reel.format)}</span>
+            ${reel.remade_project_id ? `<span class="tag tag-ok">đã làm lại</span>` : ""}
+            <span class="tiny muted">${esc(reel.artist_name || "chưa rõ nghệ sĩ")}</span>
+          </div>
+          <div class="rival-hook">“${esc(reel.hook || "(chưa có hook)")}”</div>
+          <div class="rival-metrics mono tiny">${metrics.map(esc).join(" · ")}</div>
+          <div class="tiny muted">${esc(reel.verdict || "")}</div>
+          <details class="rival-brief">
+            <summary>Xem brief làm lại (${(brief.beats || []).length} nhịp)</summary>
+            <div class="tiny" style="margin:8px 0 4px"><b>Hook:</b> ${esc(brief.hook_pattern || "")}</div>
+            <ul class="rival-beats">${(brief.beats || []).map((b) => `<li>${esc(b)}</li>`).join("")}</ul>
+            <div class="tiny muted">${esc(brief.pacing || "")}</div>
+          </details>
+        </div>
+        <div class="rival-actions">
+          ${reel.url ? `<a class="btn btn-sm btn-ghost" href="${esc(reel.url)}" target="_blank" rel="noopener">Mở reel</a>` : ""}
+          ${reel.remade_project_id
+            ? `<a class="btn btn-sm" href="#/project/${esc(reel.remade_project_id)}">Mở bài đã làm</a>`
+            : `<button class="btn btn-sm btn-primary" data-remake="${esc(reel.id)}">${ICON.spark} Làm lại</button>`}
+          <button class="btn btn-sm btn-danger" data-delrival="${esc(reel.id)}" title="Xoá reel">${ICON.trash}</button>
+        </div>
+      </article>`;
+  }
+
+  function bindRivalList(reload) {
+    $$("[data-remake]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const reel = state.rivalReels.find((r) => r.id === btn.dataset.remake);
+        if (reel) openRemakeModal(reel, reload);
+      });
+    });
+    $$("[data-delrival]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        if (!(await confirmDialog("Xoá reel này?", "Reel chỉ bị xoá khỏi danh sách theo dõi.", "Xoá reel"))) return;
+        try {
+          await api(`/api/rivals/${btn.dataset.delrival}`, { method: "DELETE" });
+          toast("Đã xoá reel", "ok");
+          reload();
+        } catch (err) {
+          toast(err.message, "err");
+        }
+      });
+    });
+  }
+
+  function openImportRivals(reload) {
+    const panel = $("#rimport-panel");
+    panel.innerHTML = `
+      <div class="panel" style="margin-bottom:16px">
+        <div class="panel-head">
+          <h3>Nhập reel đối thủ</h3>
+          <span class="tiny muted">Studio không scrape mạng xã hội — bạn dán số liệu đang thấy</span>
+          <div class="spacer"></div>
+          <button class="btn btn-sm btn-ghost" id="rimport-close">Đóng</button>
+        </div>
+        <div class="panel-body">
+          <div class="banner-tip" style="margin-bottom:10px">
+            Mỗi dòng: <code>url | nền tảng | views | likes | comments | shares | nghệ sĩ | hook | format</code><br />
+            Chỉ cần <b>url</b> là đủ để bắt đầu; số liệu nhận <code>1.2M</code>, <code>84k</code>, <code>2.1 nghìn</code>.
+            Format: story · pov · list · quote · countdown · tribute.
+          </div>
+          <textarea class="textarea" id="rimport-lines" style="min-height:130px" placeholder="https://www.tiktok.com/@user/video/123 | tiktok | 1.2M | 84k | 2.1k | 900 | Whitney Houston | The note nobody talks about | story"></textarea>
+          <div class="row" style="gap:8px;margin-top:10px">
+            <button class="btn btn-primary" id="rimport-save">${ICON.plus} Nhập vào danh sách</button>
+            <span class="tiny muted" id="rimport-hint"></span>
+          </div>
+        </div>
+      </div>`;
+    $("#rimport-close").onclick = () => { panel.innerHTML = ""; };
+    $("#rimport-save").onclick = async () => {
+      const lines = ($("#rimport-lines").value || "").trim();
+      if (!lines) return toast("Dán ít nhất một dòng", "err");
+      const btn = $("#rimport-save");
+      btn.disabled = true;
+      btn.innerHTML = "Đang nhập…";
+      try {
+        const res = await api("/api/rivals", { method: "POST", body: { lines } });
+        toast(`Đã nhập ${res.added} reel`, res.added ? "ok" : "err");
+        (res.errors || []).slice(0, 2).forEach((e) => toast(e, "err"));
+        $("#rimport-lines").value = "";
+        panel.innerHTML = "";
+        await reload();
+      } catch (err) {
+        toast(err.message, "err");
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = `${ICON.plus} Nhập vào danh sách`;
+      }
+    };
+  }
+
+  function openRemakeModal(reel, reload) {
+    const root = $("#modal-root");
+    const artists = (state.boot?.artists || []).map((a) => ({ id: a.id, name: a.name }))
+      .concat((state.boot?.custom_artists || []).map((a) => ({ id: a.id, name: `${a.name} (tự tạo)` })));
+    const guess = (state.boot?.artists || []).find(
+      (a) => a.name && reel.artist_name && a.name.toLowerCase() === String(reel.artist_name).toLowerCase(),
+    );
+    root.innerHTML = `
+      <div class="modal-back">
+        <div class="modal" style="width:min(620px,100%)">
+          <h3>Làm lại reel này</h3>
+          <p>${esc(reel.platform_label || reel.platform)} · ${esc(reel.format_label || reel.format)} · điểm ${esc(reel.score)}/100</p>
+          <div class="rival-hook" style="margin-bottom:14px">“${esc(reel.hook || "")}”</div>
+          <div class="field">
+            <label>Nghệ sĩ / nhân vật cho bản làm lại</label>
+            <select class="select" id="rm-artist">
+              ${artists.map((a) => `<option value="${esc(a.id)}" ${guess && guess.id === a.id ? "selected" : ""}>${esc(a.name)}</option>`).join("")}
+              <option value="__new__">+ Nhập tên nhân vật mới…</option>
+            </select>
+          </div>
+          <div class="field" id="rm-name-wrap" hidden>
+            <label>Tên nhân vật mới</label>
+            <input class="input" id="rm-name" placeholder="VD: Michael Jackson" value="${esc(reel.artist_name || "")}" />
+          </div>
+          <div class="row" style="gap:10px">
+            <div class="field" style="flex:1">
+              <label>Dịp</label>
+              <select class="select" id="rm-kind">
+                <option value="">Tự chọn (sự kiện gần nhất)</option>
+                <option value="birthday">Sinh nhật</option>
+                <option value="memorial">Ngày mất</option>
+                <option value="release">Kỷ niệm phát hành</option>
+                <option value="custom">Sự kiện tự nhập</option>
+              </select>
+            </div>
+            <div class="field" style="flex:1">
+              <label>Ngày</label>
+              <input type="date" class="input" id="rm-date" value="${esc(isoToday())}" />
+            </div>
+          </div>
+          <div class="field">
+            <label>Tiêu đề sự kiện / ghi chú <span class="hint">cho “kỷ niệm phát hành” hoặc “tự nhập”</span></label>
+            <input class="input" id="rm-title" placeholder="VD: the 'Bodyguard' soundtrack" value="${esc(reel.hook || "")}" />
+          </div>
+          <div class="modal-actions" style="margin-top:16px">
+            <button class="btn btn-ghost" data-act="cancel">Huỷ</button>
+            <button class="btn btn-primary" data-act="go">${ICON.spark} Tạo bản làm lại</button>
+          </div>
+        </div>
+      </div>`;
+
+    const close = () => { root.innerHTML = ""; };
+    const select = $('[data-act="cancel"]', root);
+    const go = $('[data-act="go"]', root);
+    $("#rm-artist", root).onchange = (e) => {
+      $("#rm-name-wrap", root).hidden = e.target.value !== "__new__";
+    };
+    select.onclick = close;
+    $(".modal-back", root).onclick = (e) => { if (e.target.classList.contains("modal-back")) close(); };
+    go.onclick = async () => {
+      const artistId = $("#rm-artist", root).value;
+      const payload = { create: true };
+      if (artistId === "__new__") {
+        const name = ($("#rm-name", root).value || "").trim();
+        if (!name) return toast("Nhập tên nhân vật", "err");
+        payload.artist_name = name;
+      } else {
+        payload.artist_id = artistId;
+      }
+      const kind = $("#rm-kind", root).value;
+      if (kind) {
+        payload.event = {
+          kind,
+          date: $("#rm-date", root).value || isoToday(),
+          title: ($("#rm-title", root).value || "").trim(),
+        };
+      }
+      go.disabled = true;
+      go.innerHTML = "Đang tạo…";
+      try {
+        const res = await api(`/api/rivals/${reel.id}/remake`, { method: "POST", body: payload });
+        toast(`Đã tạo bản làm lại: ${res.project.article_words} từ`, "ok");
+        close();
+        await boot();
+        location.hash = `#/project/${res.project.id}`;
+      } catch (err) {
+        toast(err.message, "err");
+        go.disabled = false;
+        go.innerHTML = `${ICON.spark} Tạo bản làm lại`;
+      }
+    };
+  }
+
   // ------------------------------------------------------------------ studio
   const TABS = [
     ["article", "1", "Bài báo"],
@@ -568,6 +966,24 @@
       script: Boolean(p.caption && p.overlay_ok),
       checks: (p.checks || []).every((c) => c.ok),
     };
+    const remake = p.remake || {};
+    const remakeHtml = remake.rival_id
+      ? `<div class="remake-card">
+           <div class="remake-head">
+             <span class="tag tag-accent">Làm lại từ reel đối thủ</span>
+             <b>${esc(remake.platform_label || remake.platform || "")}</b>
+             <span class="tiny muted">· ${esc(remake.format_label || remake.format || "")} · điểm ${esc(remake.score)}/100 (${esc(remake.tier || "")})</span>
+             <div class="spacer"></div>
+             ${remake.url ? `<a class="btn btn-sm btn-ghost" href="${esc(remake.url)}" target="_blank" rel="noopener">Mở reel gốc</a>` : ""}
+             <a class="btn btn-sm btn-ghost" href="#/rivals">Danh sách reel</a>
+           </div>
+           ${remake.hook ? `<div class="rival-hook">“${esc(remake.hook)}”</div>` : ""}
+           <details><summary class="tiny muted" style="cursor:pointer">Cấu trúc cần giữ khi dựng (${((remake.brief || {}).beats || []).length} nhịp)</summary>
+             <ul class="rival-beats">${(((remake.brief || {}).beats) || []).map((b) => `<li>${esc(b)}</li>`).join("")}</ul>
+             <div class="tiny muted">${esc(((remake.brief || {}).pacing) || "")}</div>
+           </details>
+         </div>`
+      : "";
     $("#view").innerHTML = `
       <div class="studio-head">
         <a class="btn btn-icon btn-ghost" href="#/projects" title="Quay lại">${ICON.back}</a>
@@ -592,6 +1008,7 @@
           <button class="btn btn-danger btn-sm" id="btn-del" title="Xoá dự án">${ICON.trash}</button>
         </div>
       </div>
+      ${remakeHtml}
       <div class="tabs">
         ${TABS.map(([key, num, label]) => `
           <button class="tab ${state.tab === key ? "active" : ""}" data-tab="${key}">

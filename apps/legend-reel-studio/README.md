@@ -4,6 +4,8 @@ Trang quản lý – cập nhật – sáng tạo **nội dung reels Facebook v�
 
 Một sự kiện (sinh nhật, ngày mất, kỷ niệm phát hành) → **bài báo 700–900 từ** → **bộ ảnh nghệ sĩ (1 banner + 20 ảnh)** → **text đăng bài + voiceover**. Studio **không dựng video** nữa: bạn lo phần hình, studio lo phần chữ, ảnh và giọng đọc.
 
+Hai đường vào mới: **xem reel của đối thủ đã nổi** rồi **làm lại** bằng nội dung của mình, và **tạo bài viết bằng tên nhân vật** (không cần có trong thư viện 27 nghệ sĩ).
+
 > Đây là prototype chạy thật: API FastAPI + SQLite + SPA thuần JS, không cần khoá API của bên thứ ba và không gọi LLM.
 
 ---
@@ -138,10 +140,12 @@ Dự án làm theo quy trình Spec-Driven của Spec Kit: [`spec.md`](./docs/spe
 apps/legend-reel-studio/
 ├── backend/
 │   ├── app.py            # FastAPI: REST cho dự án, ảnh, voice, export, static
-│   ├── db.py             # SQLite: projects + custom_events, migration cột mới
+│   ├── db.py             # SQLite: projects + custom_events + custom_artists + rival_reels
 │   ├── library.py        # tính sự kiện theo ngày, tìm kiếm
 │   ├── seed_artists.py   # 27 huyền thoại + 15 cột mốc phát hành
 │   ├── content.py        # bài báo 700–900 từ, chữ 9–15 từ, hook, caption, checks
+│   ├── profiles.py       # profile sinh từ đúng cái tên (bài 700–900 từ, link nhạc dạng tìm kiếm)
+│   ├── rivals.py         # chấm điểm reel đối thủ, brief làm lại, đọc dòng nhập tay
 │   ├── images.py         # Wikipedia + Wikimedia Commons (license), tải link, lưu JPEG
 │   └── voice.py          # edge-tts (en-US neural) → fallback pyttsx3
 ├── web/                  # SPA thuần JS + CSS, font OFL
@@ -153,7 +157,29 @@ apps/legend-reel-studio/
 └── data/                 # studio.db, images/, voice/  (git-ignored)
 ```
 
-## 5. Nội dung được sinh như thế nào
+## 5. Reels đối thủ — lọc bài đã nổi rồi làm lại
+
+Mục **Reels đối thủ** (sidebar) để bạn ghi lại những reel cùng ngách đang ăn view, rồi rút cấu trúc của chúng cho bài của mình.
+
+- **Nhập tay, dán link**: mỗi dòng `url | nền tảng | views | likes | comments | shares | nghệ sĩ | hook | format`. Số viết kiểu `1.2M`, `84k`, `2.1 nghìn`, `1.5 triệu` hay `1,234` đều hiểu đúng. Nền tảng để trống thì studio đoán từ link. Studio **không scrape** Facebook/Instagram/TikTok — bạn tự xem reel rồi dán số liệu.
+- **Chấm “đã nổi”**: điểm 0–100 = độ phủ (≤50) + tỉ lệ tương tác (≤40) + độ mới (≤10), kèm nhãn `Đột phá / Nổi / Khá / Mới`. Reel ít view nhưng tương tác cao vẫn có thể vượt reel triệu view — đúng ý “đã nổi”, không chỉ “nhiều view”.
+- **Lọc & xếp hạng**: tìm theo hook/nghệ sĩ, lọc theo nền tảng, format, trạng thái, `điểm tối thiểu`, `chưa làm lại`, xếp theo điểm / view / tương tác / mới nhất.
+- **Brief làm lại** (mở ngay trên card): mẫu hook của format, 5 nhịp thời lượng, nhịp độ, lý do reel ăn view, và **quy tắc làm lại**.
+- **Một nút “Làm lại”**: chọn nghệ sĩ trong thư viện, hoặc gõ tên mới, hoặc để trống — studio tạo dự án mới bằng đúng pipeline cũ (bài 700–900 từ, ảnh có license, text & voice) và gắn brief vào dự án (hiện ở đầu trang Studio, có trong `article.md` và `bundle.zip`).
+
+**Sạch về bản quyền**: bản làm lại chỉ lấy *cấu trúc*, không lấy tài sản. Studio không tải video/audio của đối thủ, không dùng ảnh của họ, không copy chữ — toàn bộ bài viết là câu tiếng Anh do template của bạn sinh, ảnh lấy từ Wikipedia/Commons hoặc do bạn dán.
+
+## 6. Tạo bài viết bằng tên nhân vật
+
+Ở **Khám phá** có ô “Tạo bài viết bằng tên nhân vật”: gõ bất kỳ tên người/nhân vật nào (không cần có trong thư viện), chọn dịp + ngày, rồi bấm **Tạo bài viết**.
+
+- Không nhập gì thêm: studio sinh profile tối thiểu từ đúng cái tên, bài vẫn **700–900 từ**, vẫn có tiêu đề, chữ trên video 9–15 từ, hook, caption, hashtag, comment pin và voice script.
+- Muốn bài sát thật hơn, mở “Thêm chi tiết”: nghệ danh, thể loại, giai đoạn, quê quán, năm sinh/mất, giọng (he/she), link nguồn Wikipedia, danh sách bài hát `Tên | năm`, và các ghi chú/sự thật.
+- **Không tự bịa**: studio chỉ dùng đúng những gì bạn nhập cho phần profile. Bài hát không có mã video thì link nhạc là link *tìm kiếm* YouTube (không chết link).
+- Nhân vật được lưu lại thành profile riêng: gõ lại đúng tên đó lần sau sẽ dùng lại profile (không tạo trùng), sửa/xoá được qua `/api/artists/custom`; profile đang có dự án thì không xoá được.
+- Bài viết này dùng lại toàn bộ phần sau: ảnh, text & voice, kiểm tra, xuất `.md` / `bundle.zip`.
+
+## 7. Nội dung được sinh như thế nào
 
 Không gọi LLM, nên chạy offline và không tốn phí:
 
@@ -163,7 +189,7 @@ Không gọi LLM, nên chạy offline và không tốn phí:
 - **Hook/caption/comment**: mỗi loại có nhiều biến thể, ưu tiên câu hỏi/cảm xúc và CTA “đọc comment đầu tiên”, tránh khẳng định không kiểm chứng được.
 - **Link nhạc**: dùng link *tìm kiếm* YouTube/Spotify (`results?search_query=…`) để không bị chết link khi video gốc bị gỡ.
 
-## 6. Ảnh nghệ sĩ
+## 8. Ảnh nghệ sĩ
 
 - **Một nút “Tự động lấy 20 ảnh”**: gom ảnh từ Wikipedia (ảnh chính của trang nghệ sĩ) + Wikimedia Commons (tìm theo tên nghệ sĩ và tên trang), thêm thẳng vào dự án. Mỗi ảnh trả về kèm **giấy phép, URL giấy phép, tác giả** (đã bóc HTML) và **link trang file**. Muốn xem trước rồi mới chọn thì dùng “Chọn thủ công”.
 - **Chẩn đoán khi vẫn lỗi**: nút **“Kiểm tra mạng”** trong tab Ảnh nghệ sĩ gọi thử Wikipedia API, Commons API và ảnh Commons ngay từ trình duyệt, in kết quả (OK / HTTP / lỗi + số ms) vào dòng trạng thái và gửi về `POST /api/client-log` để xem lại trong `data/client.log`.
@@ -174,7 +200,7 @@ Không gọi LLM, nên chạy offline và không tốn phí:
 - **Banner + tải về máy**: ảnh đầu tiên tự thành banner, đổi bất cứ lúc nào; mỗi ảnh có nút **Tải về**, cả bộ có **Tải tất cả (.zip)** kèm `ATTRIBUTION.txt` — đây là đường đưa ảnh về máy tính của bạn (thư mục Downloads), không phải chỉ xem trong trình duyệt.
 - Hạn mức mềm: mục tiêu **1 banner + 20 ảnh** (tối đa 60 ảnh/dự án).
 
-## 7. Voice
+## 9. Voice
 
 | | Engine | Ghi chú |
 | --- | --- | --- |
@@ -186,7 +212,7 @@ API lưu voice vào `data/voice/<project>/`, trả URL để **nghe thử trong 
 
 **Đổi giọng đọc:** mỗi lần bấm “Tạo voice”, studio ghi ra **file mới** (`voiceover-<mã>.mp3`) và xoá bản cũ, nên trình duyệt không bao giờ phát lại bản ghi cũ từ cache (`/media/voice/*` trả `Cache-Control: no-store`). Chọn giọng khác trong dropdown → nút “Tạo voice” sáng lên → bấm để ghi lại; nếu `edge-tts` không chạy được (không có Internet, hoặc bị chặn `speech.platform.bing.com`), studio dùng giọng hệ thống `pyttsx3` và **hiện cảnh báo rõ** rằng giọng en-US bạn chọn chưa được áp dụng — vì vậy mọi lựa chọn sẽ nghe giống nhau cho tới khi có mạng.
 
-## 8. API
+## 10. API
 
 | Method | Endpoint | Mô tả |
 | --- | --- | --- |
@@ -194,6 +220,11 @@ API lưu voice vào `data/voice/<project>/`, trả URL để **nghe thử trong 
 | GET | `/api/events?day=&window=&q=&kinds=` | Tìm sự kiện theo ngày/khoảng/từ khoá/loại |
 | GET | `/api/artists`, `/api/artists/{id}` | Danh sách/chi tiết nghệ sĩ |
 | POST | `/api/events/custom` | Thêm sự kiện riêng |
+| GET/POST | `/api/rivals` | Danh sách/nhập reel đối thủ (`lines` hoặc `items`), lọc + xếp theo điểm đã nổi |
+| PATCH/DELETE | `/api/rivals/{id}` | Sửa/xoá reel (ghi chú, trạng thái `moi\|dang-lam\|da-lam`) |
+| POST | `/api/rivals/{id}/remake` | Làm lại reel: tạo dự án mới cùng pipeline, gắn brief + link reel gốc |
+| GET/POST | `/api/artists/custom` | Profile tạo bằng tên; `PATCH/DELETE /api/artists/custom/{id}` |
+| POST | `/api/projects/custom` | Tạo dự án từ tên nhân vật (`{name, profile?, event?, seed?, generate?}`) |
 | GET/POST | `/api/projects` | Danh sách/tạo dự án (tạo là sinh luôn bài báo + text/voice script) |
 | GET/PATCH/DELETE | `/api/projects/{id}` | Đọc/cập nhật/xoá |
 | POST | `/api/projects/{id}/duplicate` | Nhân bản (copy cả ảnh, bỏ voice/banner) |
@@ -214,26 +245,26 @@ API lưu voice vào `data/voice/<project>/`, trả URL để **nghe thử trong 
 | POST/DELETE | `/api/projects/{id}/voice` | Tạo/xoá voiceover |
 | GET | `/api/projects/{id}/export?fmt=md\|json` | Xuất gói bài đăng (bài báo, ảnh credits, text, voice) |
 
-## 9. Ghi chú bản quyền & dữ liệu
+## 11. Ghi chú bản quyền & dữ liệu
 
 - **Ảnh**: ảnh từ Wikimedia có giấy phép mở nhưng **vẫn phải kiểm tra từng file** trước khi dùng thương mại; studio lưu license/attribution và xuất kèm `ATTRIBUTION.txt`. Ảnh từ Pinterest/Getty do bạn tự chịu trách nhiệm về quyền sử dụng.
 - **Nhạc**: chỉ dùng bản bạn có quyền — studio chỉ đưa link tìm kiếm, không tải nhạc.
 - **Voice**: chỉ dùng text do bạn viết; giọng neural của edge-tts tuân theo điều khoản của Microsoft.
 - Dữ liệu ngày sinh/ngày mất và cột mốc phát hành là dữ liệu lịch sử; sửa trong `backend/seed_artists.py`.
 
-## 10. Kiểm thử
+## 12. Kiểm thử
 
 ```bash
 cd apps/legend-reel-studio
 . .venv/bin/activate
 pytest -q                              # API, nội dung, ảnh (mock mạng), voice (mock engine)
 npm install                            # chỉ cần cho test UI (jsdom)
-node tests/ui_smoke.mjs               # jsdom: sidebar, 3 tab, copy, banner, voice panel
+node tests/ui_smoke.mjs               # jsdom: sidebar 5 mục, 3 tab, copy, banner, voice, reels đối thủ, bài theo tên
 ```
 
-`pytest` bao gồm: tính sự kiện theo ngày (kể cả 29/02), tìm kiếm, ràng buộc 9–15 từ, **bài báo luôn 700–900 từ cho cả 27 nghệ sĩ**, import ảnh từ Wikipedia/Commons với license, chặn link Pinterest/`localhost`/HTML, zip + `ATTRIBUTION.txt`, và voice với cả ba nhánh (edge-tts, pyttsx3, không có engine).
+`pytest` bao gồm: tính sự kiện theo ngày (kể cả 29/02), tìm kiếm, ràng buộc 9–15 từ, **bài báo luôn 700–900 từ cho cả 27 nghệ sĩ**, import ảnh từ Wikipedia/Commons với license, chặn link Pinterest/`localhost`/HTML, zip + `ATTRIBUTION.txt`, voice với cả ba nhánh (edge-tts, pyttsx3, không có engine), **profile tạo bằng tên** (700–900 từ, không in “0 years”, link nhạc dạng tìm kiếm) và **reel đối thủ** (đọc số `1.2M/84k/1,5 triệu`, chấm điểm, lọc, làm lại, brief nằm trong `.md`/`bundle.zip`).
 
-## 11. Giới hạn đã biết
+## 13. Giới hạn đã biết
 
 - Nội dung sinh theo template, chưa phải văn phong tự do như LLM — phù hợp để duyệt nhanh rồi biên tập.
 - Studio **không dựng video** và không upload lên Facebook: bạn tự dựng reel bằng công cụ quen tay rồi đăng (chưa có Graph API).

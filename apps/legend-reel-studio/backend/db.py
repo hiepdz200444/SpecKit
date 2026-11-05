@@ -42,6 +42,42 @@ CREATE TABLE IF NOT EXISTS projects (
 );
 CREATE INDEX IF NOT EXISTS idx_projects_updated ON projects(updated_at DESC);
 
+CREATE TABLE IF NOT EXISTS custom_artists (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    aka TEXT DEFAULT '',
+    genre TEXT DEFAULT '',
+    era TEXT DEFAULT '',
+    hometown TEXT DEFAULT '',
+    birth TEXT DEFAULT '',
+    death TEXT DEFAULT '',
+    gender TEXT DEFAULT '',
+    legacy TEXT DEFAULT '',
+    facts_json TEXT DEFAULT '[]',
+    songs_json TEXT DEFAULT '[]',
+    source_url TEXT DEFAULT '',
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS rival_reels (
+    id TEXT PRIMARY KEY,
+    platform TEXT NOT NULL DEFAULT 'facebook',
+    url TEXT DEFAULT '',
+    artist_name TEXT DEFAULT '',
+    hook TEXT DEFAULT '',
+    views INTEGER DEFAULT 0,
+    likes INTEGER DEFAULT 0,
+    comments INTEGER DEFAULT 0,
+    shares INTEGER DEFAULT 0,
+    format TEXT NOT NULL DEFAULT 'story',
+    notes TEXT DEFAULT '',
+    posted_at TEXT DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'new',
+    remade_project_id TEXT DEFAULT '',
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_rivals_created ON rival_reels(created_at DESC);
+
 CREATE TABLE IF NOT EXISTS custom_events (
     id TEXT PRIMARY KEY,
     artist_id TEXT NOT NULL,
@@ -58,6 +94,7 @@ ADDED_COLUMNS = {
     "images_json": "TEXT DEFAULT '[]'",
     "script_json": "TEXT DEFAULT '{}'",
     "voice_json": "TEXT DEFAULT '{}'",
+    "remake_json": "TEXT DEFAULT '{}'",
 }
 
 JSON_FIELDS = {
@@ -67,6 +104,7 @@ JSON_FIELDS = {
     "images_json": ("images", list),
     "script_json": ("script", dict),
     "voice_json": ("voice", dict),
+    "remake_json": ("remake", dict),
 }
 
 FIELD_MAP = {
@@ -90,6 +128,7 @@ JSON_IN = {
     "script": "script_json",
     "voice": "voice_json",
     "event": "event_json",
+    "remake": "remake_json",
 }
 
 
@@ -236,3 +275,183 @@ def add_custom_event(artist_id: str, date_str: str, title: str, kind: str = "cus
 def list_custom_events() -> list[dict]:
     with connect() as conn:
         return [dict(r) for r in conn.execute("SELECT * FROM custom_events ORDER BY date").fetchall()]
+
+
+# --------------------------------------------------------------------------- #
+# artists typed in by the operator ("tạo bài viết bằng tên nhân vật")          #
+# --------------------------------------------------------------------------- #
+CUSTOM_ARTIST_FIELDS = (
+    "name", "aka", "genre", "era", "hometown", "birth", "death", "gender", "legacy", "source_url",
+)
+
+
+def create_custom_artist(profile: dict) -> dict:
+    import re as _re
+
+    name = (profile.get("name") or "").strip()
+    aid = "custom-" + uuid.uuid4().hex[:8]
+    values = {key: str(profile.get(key) or "").strip() for key in CUSTOM_ARTIST_FIELDS}
+    values["name"] = name
+    with connect() as conn:
+        conn.execute(
+            "INSERT INTO custom_artists (id, name, aka, genre, era, hometown, birth, death, gender, legacy,"
+            " facts_json, songs_json, source_url, created_at)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                aid,
+                values["name"],
+                values["aka"],
+                values["genre"],
+                values["era"],
+                values["hometown"],
+                values["birth"],
+                values["death"],
+                values["gender"],
+                values["legacy"],
+                json.dumps(profile.get("facts") or [], ensure_ascii=False),
+                json.dumps(profile.get("songs") or [], ensure_ascii=False),
+                values["source_url"],
+                now(),
+            ),
+        )
+    del _re  # keep the name lookup simple: ids are generated, names are free-form
+    return get_custom_artist(aid)  # type: ignore[return-value]
+
+
+def row_to_custom_artist(row: sqlite3.Row) -> dict:
+    data = dict(row)
+    for column, key in (("facts_json", "facts"), ("songs_json", "songs")):
+        raw = data.pop(column, "[]")
+        try:
+            parsed = json.loads(raw) if raw else []
+        except json.JSONDecodeError:
+            parsed = []
+        data[key] = parsed if isinstance(parsed, list) else []
+    data["custom"] = True
+    return data
+
+
+def get_custom_artist(aid: str) -> dict | None:
+    with connect() as conn:
+        row = conn.execute("SELECT * FROM custom_artists WHERE id = ?", (aid,)).fetchone()
+    return row_to_custom_artist(row) if row else None
+
+
+def list_custom_artists() -> list[dict]:
+    with connect() as conn:
+        rows = conn.execute("SELECT * FROM custom_artists ORDER BY created_at DESC").fetchall()
+    return [row_to_custom_artist(r) for r in rows]
+
+
+def find_custom_artist(name: str) -> dict | None:
+    needle = (name or "").strip().lower()
+    if not needle:
+        return None
+    with connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM custom_artists WHERE lower(name) = ? ORDER BY created_at LIMIT 1", (needle,)
+        ).fetchone()
+    return row_to_custom_artist(row) if row else None
+
+
+def update_custom_artist(aid: str, patch: dict) -> dict | None:
+    sets, params = [], []
+    for key in CUSTOM_ARTIST_FIELDS:
+        if key in patch and key != "name":
+            sets.append(f"{key} = ?")
+            params.append(str(patch[key] or "").strip())
+    for key, column in (("facts", "facts_json"), ("songs", "songs_json")):
+        if key in patch:
+            sets.append(f"{column} = ?")
+            params.append(json.dumps(patch[key] or [], ensure_ascii=False))
+    if not sets:
+        return get_custom_artist(aid)
+    params.append(aid)
+    with connect() as conn:
+        conn.execute(f"UPDATE custom_artists SET {', '.join(sets)} WHERE id = ?", params)
+    return get_custom_artist(aid)
+
+
+def delete_custom_artist(aid: str) -> bool:
+    with connect() as conn:
+        cur = conn.execute("DELETE FROM custom_artists WHERE id = ?", (aid,))
+    return cur.rowcount > 0
+
+
+def count_projects_for_artist(aid: str) -> int:
+    with connect() as conn:
+        return conn.execute("SELECT COUNT(*) c FROM projects WHERE artist_id = ?", (aid,)).fetchone()["c"]
+
+
+# --------------------------------------------------------------------------- #
+# competitor reels ("lọc reels đối thủ đã nổi")                                #
+# --------------------------------------------------------------------------- #
+RIVAL_FIELDS = (
+    "platform", "url", "artist_name", "hook", "views", "likes", "comments", "shares",
+    "format", "notes", "posted_at", "status", "remade_project_id",
+)
+
+
+def _rival_values(reel: dict) -> list:
+    out = []
+    for key in RIVAL_FIELDS:
+        value = reel.get(key, "")
+        if key in ("views", "likes", "comments", "shares"):
+            try:
+                out.append(max(0, int(value or 0)))
+            except (TypeError, ValueError):
+                out.append(0)
+        else:
+            out.append(str(value or "").strip())
+    return out
+
+
+def create_rival(reel: dict) -> dict:
+    rid = uuid.uuid4().hex[:12]
+    with connect() as conn:
+        conn.execute(
+            f"INSERT INTO rival_reels (id, {', '.join(RIVAL_FIELDS)}, created_at)"
+            f" VALUES (?, {', '.join(['?'] * len(RIVAL_FIELDS))}, ?)",
+            [rid, *_rival_values(reel), now()],
+        )
+    return get_rival(rid)  # type: ignore[return-value]
+
+
+def get_rival(rid: str) -> dict | None:
+    with connect() as conn:
+        row = conn.execute("SELECT * FROM rival_reels WHERE id = ?", (rid,)).fetchone()
+    return dict(row) if row else None
+
+
+def list_rivals() -> list[dict]:
+    with connect() as conn:
+        return [dict(r) for r in conn.execute("SELECT * FROM rival_reels ORDER BY created_at DESC").fetchall()]
+
+
+def update_rival(rid: str, patch: dict) -> dict | None:
+    clean = {k: v for k, v in patch.items() if k in RIVAL_FIELDS}
+    if not clean:
+        return get_rival(rid)
+    sets, params = [], []
+    for key, value in clean.items():
+        if key in ("views", "likes", "comments", "shares"):
+            try:
+                value = max(0, int(value or 0))
+            except (TypeError, ValueError):
+                continue
+        else:
+            value = str(value or "").strip()
+        sets.append(f"{key} = ?")
+        params.append(value)
+    if not sets:
+        return get_rival(rid)
+    params.append(rid)
+    with connect() as conn:
+        conn.execute(f"UPDATE rival_reels SET {', '.join(sets)} WHERE id = ?", params)
+    return get_rival(rid)
+
+
+def delete_rival(rid: str) -> bool:
+    with connect() as conn:
+        cur = conn.execute("DELETE FROM rival_reels WHERE id = ?", (rid,))
+    return cur.rowcount > 0

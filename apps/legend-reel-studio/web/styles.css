@@ -404,3 +404,31 @@ a.song-chip:hover { background: var(--accent-soft); color: #ffd79a; }
   .stats { grid-template-columns: 1fr 1fr; }
   .event-grid { grid-template-columns: 1fr; }
 }
+
+/* competitor reels + remake */
+.rival-list { display: flex; flex-direction: column; gap: 12px; }
+.rival-card { display: grid; grid-template-columns: 76px 1fr auto; gap: 16px; align-items: start; border: 1px solid var(--line); border-radius: 16px; padding: 14px 16px; background: linear-gradient(165deg, rgba(255, 255, 255, 0.03), rgba(20, 22, 32, 0.5)); }
+.rival-score { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; border-radius: 14px; padding: 10px 6px; border: 1px solid var(--line-strong); background: rgba(255, 255, 255, 0.04); }
+.rival-score b { font-family: "Anton", sans-serif; font-size: 24px; line-height: 1; }
+.rival-score span { font-size: 10.5px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+.rival-score.tier-hot { border-color: rgba(255, 111, 111, 0.5); background: rgba(255, 111, 111, 0.1); }
+.rival-score.tier-hot b { color: #ffb4b4; }
+.rival-score.tier-good { border-color: rgba(240, 176, 76, 0.5); background: rgba(240, 176, 76, 0.1); }
+.rival-score.tier-good b { color: var(--accent); }
+.rival-score.tier-mid b { color: #cfe0ff; }
+.rival-score.tier-low b { color: var(--muted); }
+.rival-body { min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.rival-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.rival-hook { font-family: "DM Serif Display", serif; font-size: 17px; line-height: 1.45; color: #f2e6cf; }
+.rival-metrics { opacity: 0.85; }
+.rival-brief summary { cursor: pointer; color: var(--accent); font-size: 12px; }
+.rival-beats { margin: 6px 0 6px; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; color: var(--ink-2); font-size: 12.5px; }
+.rival-actions { display: flex; flex-direction: column; gap: 8px; align-items: stretch; }
+
+.remake-card { border: 1px solid rgba(240, 176, 76, 0.35); border-radius: 16px; padding: 14px 16px; margin: 4px 0 18px; background: rgba(240, 176, 76, 0.07); display: flex; flex-direction: column; gap: 8px; }
+.remake-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+@media (max-width: 720px) {
+  .rival-card { grid-template-columns: 64px 1fr; }
+  .rival-actions { flex-direction: row; grid-column: 1 / -1; }
+}
