@@ -64,6 +64,7 @@
 - [x] T043 `GET /api/projects/{id}/bundle.zip` + nút “Tải về máy” (bài báo, JSON, ảnh, voice, `HUONG-DAN.txt`)
 - [x] T044 Nút “Kiểm tra mạng” + `POST/GET /api/client-log` để chẩn đoán lỗi mạng phía trình duyệt
 - [x] T045 `pytest` 58 test, jsdom 50 check
+- [x] T046 Sửa lỗi “đổi voice vẫn nghe bản cũ”: tên file voice mới mỗi lần tạo, `Cache-Control: no-store` cho `/media/voice/`, cảnh báo khi phải dùng pyttsx3 thay edge-tts, nhắc bấm “Tạo voice” khi đổi dropdown (61 pytest, 52 jsdom check)
 
 ## Backlog (chưa làm)
 

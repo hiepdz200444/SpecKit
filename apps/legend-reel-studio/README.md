@@ -158,6 +158,8 @@ Không gọi LLM, nên chạy offline và không tốn phí:
 
 API lưu voice vào `data/voice/<project>/`, trả URL để **nghe thử trong trình duyệt** (`<audio>`) và tải file. Text tối đa 4000 ký tự.
 
+**Đổi giọng đọc:** mỗi lần bấm “Tạo voice”, studio ghi ra **file mới** (`voiceover-<mã>.mp3`) và xoá bản cũ, nên trình duyệt không bao giờ phát lại bản ghi cũ từ cache (`/media/voice/*` trả `Cache-Control: no-store`). Chọn giọng khác trong dropdown → nút “Tạo voice” sáng lên → bấm để ghi lại; nếu `edge-tts` không chạy được (không có Internet, hoặc bị chặn `speech.platform.bing.com`), studio dùng giọng hệ thống `pyttsx3` và **hiện cảnh báo rõ** rằng giọng en-US bạn chọn chưa được áp dụng — vì vậy mọi lựa chọn sẽ nghe giống nhau cho tới khi có mạng.
+
 ## 8. API
 
 | Method | Endpoint | Mô tả |

@@ -322,6 +322,13 @@ async function main() {
     const overlayWords = Number(($("#overlay-count").textContent.match(/\d+/) || [0])[0]);
     ok(overlayWords >= 9 && overlayWords <= 15, `on-screen text is 9–15 words (${overlayWords})`);
     ok($('[data-copy="overlay"]') && $('[data-copy="hook"]') && $('[data-copy="caption"]') && $('[data-copy="comment"]'), "every text block has a Copy button");
+    // đổi giọng trong dropdown phải nói rõ là phải bấm “Tạo voice” mới ghi lại
+    const voiceSel = $("#voice-select");
+    const otherVoice = Array.from(voiceSel.options).map((o) => o.value).find((v) => v !== voiceSel.value);
+    voiceSel.value = otherVoice;
+    voiceSel.dispatchEvent(new window.Event("change", { bubbles: true }));
+    ok(/bấm “Tạo voice”/.test($("#voice-status").textContent), "đổi giọng nhắc phải bấm Tạo voice để ghi lại");
+    ok($("#btn-voice").classList.contains("is-hot"), "nút Tạo voice được làm nổi bật sau khi đổi giọng");
     const voiceOptions = Array.from($("#voice-select").options).map((o) => o.value);
     ok(voiceOptions.length >= 4 && voiceOptions.every((v) => v.startsWith("en-US-")), "voice picker lists en-US neural voices");
     ok(!!$("#btn-voice") && !!$("#voice-text"), "voice generator + text box available");

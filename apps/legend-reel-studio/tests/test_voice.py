@@ -126,3 +126,67 @@ def test_text_limit(monkeypatch):
     res = client.post(f"/api/projects/{project['id']}/voice", json={"text": "x" * (voice_mod.MAX_CHARS + 10)})
     assert res.status_code == 400
     assert "quá dài" in res.json()["detail"]
+
+
+def test_changing_the_voice_produces_a_new_file_and_url(monkeypatch):
+    monkeypatch.setattr(voice_mod, "_edge_available", lambda: True)
+
+    def fake_edge(text, voice, path, timeout=45.0):
+        with open(path, "wb") as f:
+            f.write(b"ID3" + voice.encode() + b"\x00" * 1024)
+
+    monkeypatch.setattr(voice_mod, "_edge_save", fake_edge)
+    project = _project()
+    first = client.post(
+        f"/api/projects/{project['id']}/voice",
+        json={"text": "Pick a different voice please.", "voice": "en-US-AriaNeural"},
+    ).json()["voice"]
+    second = client.post(
+        f"/api/projects/{project['id']}/voice",
+        json={"text": "Pick a different voice please.", "voice": "en-US-GuyNeural"},
+    ).json()["voice"]
+
+    assert first["voice"] == "en-US-AriaNeural" and second["voice"] == "en-US-GuyNeural"
+    assert first["applied"] is True and second["applied"] is True
+    assert first["url"] != second["url"], "URL must change so the browser cannot replay the old take"
+    assert first["file"] != second["file"]
+    # the old recording is cleaned up, the new one plays
+    assert client.get(first["url"]).status_code == 404
+    fresh = client.get(second["url"])
+    assert fresh.status_code == 200
+    assert b"GuyNeural" in fresh.content
+    # a re-render of the project keeps the latest take
+    stored = client.get(f"/api/projects/{project['id']}").json()["voice"]
+    assert stored["url"] == second["url"]
+
+
+def test_voice_files_are_served_without_caching(monkeypatch):
+    monkeypatch.setattr(voice_mod, "_edge_available", lambda: True)
+    monkeypatch.setattr(voice_mod, "_edge_save", lambda text, voice, path, timeout=45.0: _write_mp3(path))
+    project = _project()
+    made = client.post(f"/api/projects/{project['id']}/voice", json={"text": "No cache allowed."}).json()["voice"]
+    res = client.get(made["url"])
+    assert res.status_code == 200
+    assert res.headers["cache-control"] == "no-store"
+
+
+def test_fallback_says_the_chosen_voice_was_not_applied(monkeypatch):
+    monkeypatch.setattr(voice_mod, "_edge_available", lambda: True)
+
+    def boom(*_a, **_k):
+        raise OSError("network down")
+
+    monkeypatch.setattr(voice_mod, "_edge_save", boom)
+    monkeypatch.setattr(voice_mod, "_pyttsx3_available", lambda: True)
+    monkeypatch.setattr(voice_mod, "_pyttsx3_save", lambda text, path: _write_wav(path))
+    monkeypatch.setattr(voice_mod.shutil, "which", lambda _name: None)
+
+    project = _project()
+    voice = client.post(
+        f"/api/projects/{project['id']}/voice",
+        json={"text": "System voice fallback.", "voice": "en-US-JennyNeural"},
+    ).json()["voice"]
+    assert voice["engine"] == "pyttsx3"
+    assert voice["applied"] is False
+    assert voice["requested_voice"] == "en-US-JennyNeural"
+    assert "Internet" in voice["note"] and "pyttsx3" in voice["note"]

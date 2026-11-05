@@ -14,9 +14,11 @@ working.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import os
 import shutil
 import subprocess
+import time
 import wave
 from typing import Any
 
@@ -125,8 +127,12 @@ def synthesize(data_dir: str, project_id: str, text: str, voice: str = DEFAULT_V
     if not any(v["id"] == voice for v in NEURAL_VOICES):
         voice = DEFAULT_VOICE
     folder = voice_dir(data_dir, project_id)
-    target = os.path.join(folder, "voiceover")
-    for stale in (target + ".mp3", target + ".wav"):
+    # A fresh file name per generation: the browser (and any CDN) can never
+    # serve the previous recording from cache when the user picks another voice.
+    digest = hashlib.sha1(f"{text}|{voice}|{time.time_ns()}".encode("utf-8")).hexdigest()[:8]
+    target = os.path.join(folder, f"voiceover-{digest}")
+    for legacy in ("voiceover.mp3", "voiceover.wav"):
+        stale = os.path.join(folder, legacy)
         if os.path.exists(stale):
             os.remove(stale)
 
@@ -144,8 +150,8 @@ def synthesize(data_dir: str, project_id: str, text: str, voice: str = DEFAULT_V
             _pyttsx3_save(text, target + ".wav")
             if _to_mp3(target + ".wav", target + ".mp3"):
                 os.remove(target + ".wav")
-                return _result(target + ".mp3", data_dir, "pyttsx3 + ffmpeg", voice, text)
-            return _result(target + ".wav", data_dir, "pyttsx3", voice, text)
+                return _result(target + ".mp3", data_dir, "pyttsx3 + ffmpeg", voice, text, fallback_reason="; ".join(errors))
+            return _result(target + ".wav", data_dir, "pyttsx3", voice, text, fallback_reason="; ".join(errors))
         except Exception as exc:  # noqa: BLE001
             errors.append(f"pyttsx3: {exc}")
 
@@ -156,15 +162,35 @@ def synthesize(data_dir: str, project_id: str, text: str, voice: str = DEFAULT_V
     )
 
 
-def _result(path: str, data_dir: str, engine: str, voice: str, text: str) -> dict[str, Any]:
+def _result(
+    path: str,
+    data_dir: str,
+    engine: str,
+    voice: str,
+    text: str,
+    fallback_reason: str = "",
+) -> dict[str, Any]:
     ext = os.path.splitext(path)[1].lstrip(".").lower()
+    applied = engine.startswith("edge-tts")
+    note = ""
+    if not applied:
+        note = (
+            "Chưa áp dụng giọng en-US bạn chọn: edge-tts cần Internet nên studio dùng "
+            "giọng hệ thống (pyttsx3) — mọi lựa chọn sẽ nghe giống nhau cho tới khi có mạng."
+        )
+        if fallback_reason:
+            note = f"{note} Lý do: {fallback_reason[:160]}"
     return {
         "path": path,
         "file": os.path.relpath(path, data_dir).replace(os.sep, "/"),
         "engine": engine,
         "voice": voice,
+        "requested_voice": voice,
+        "applied": applied,
+        "note": note,
         "ext": ext,
         "bytes": os.path.getsize(path),
         "duration": _wav_duration(path) if ext == "wav" else 0.0,
         "text": text,
+        "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
     }

@@ -583,12 +583,23 @@ def make_voice(pid: str, payload: dict = Body(...)):
         "file": result["file"],
         "engine": result["engine"],
         "voice": result["voice"],
+        "requested_voice": result.get("requested_voice", result["voice"]),
+        "applied": bool(result.get("applied", True)),
+        "note": result.get("note", ""),
         "ext": result["ext"],
         "bytes": result["bytes"],
         "duration": result["duration"],
         "text": result["text"],
         "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
     }
+    previous = (project.get("voice") or {}).get("file")
+    if previous and previous != record["file"]:
+        stale = os.path.join(DATA_DIR, previous)
+        if os.path.exists(stale):
+            try:
+                os.remove(stale)
+            except OSError:
+                pass
     updated = serialize_project(db.update_project(pid, {"voice": record}))
     return {"project": updated, "voice": updated["voice"]}
 
@@ -714,6 +725,10 @@ async def _fresh_shell(request, call_next):
     path = request.url.path
     if path == "/" or path.endswith((".html", ".js", ".css")):
         response.headers["Cache-Control"] = "no-cache"
+    elif path.startswith("/media/voice/"):
+        # voiceover files must never come from cache: the user may re-record with
+        # another voice at any time and expects to hear the new take
+        response.headers["Cache-Control"] = "no-store"
     elif path.startswith(("/assets/", "/media/")):
         response.headers.setdefault("Cache-Control", "public, max-age=600")
     return response

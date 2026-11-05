@@ -1530,7 +1530,8 @@
                 <button class="btn btn-primary" id="btn-voice">${ICON.mic} Tạo voice</button>
                 ${voice.url ? `<a class="btn" href="${esc(voice.url)}" download>${ICON.download} Tải .${esc(voice.ext || "mp3")}</a>` : ""}
               </div>
-              <div id="voice-status" class="banner-tip">${voice.url ? `Bản gần nhất: ${esc(voice.engine)} · ${esc(voice.voice)} · ${Math.round((voice.bytes || 0) / 1024)} KB` : "Nghe thử ngay trong trình duyệt, sau đó tải file để ghép vào video bạn tự dựng."}</div>
+              <div id="voice-status" class="banner-tip">${voice.url ? `Bản gần nhất: ${esc(voice.engine)} · ${esc(voice.applied === false ? "giọng hệ thống (chưa áp dụng en-US)" : voice.voice)} · ${Math.round((voice.bytes || 0) / 1024)} KB` : "Nghe thử ngay trong trình duyệt, sau đó tải file để ghép vào video bạn tự dựng."}</div>
+              ${voice.url && voice.applied === false ? `<div class="warn-line" id="voice-warn">${ICON.warn || "!"} ${esc(voice.note || "Giọng en-US bạn chọn chưa áp dụng được — edge-tts cần Internet.")}</div>` : ""}
               <div id="voice-player" style="margin-top:12px">
                 ${voice.url ? `<audio controls src="${esc(voice.url)}" style="width:100%"></audio>` : ""}
               </div>
@@ -1655,6 +1656,21 @@
       finally { btn.disabled = false; }
     };
 
+    const voiceSelect = $("#voice-select");
+    if (voiceSelect) {
+      voiceSelect.onchange = () => {
+        const picked = (state.boot?.voices || []).find((v) => v.id === voiceSelect.value);
+        const label = picked ? picked.label : voiceSelect.value;
+        toast(`Đã chọn giọng: ${label} — bấm “Tạo voice” để ghi lại bằng giọng này`, "ok");
+        const makeBtn = $("#btn-voice");
+        if (makeBtn) makeBtn.classList.add("is-hot");
+        const status = $("#voice-status");
+        if (status) {
+          status.innerHTML = `Đang chọn <b>${esc(label)}</b> — bản voice hiện tại vẫn là bản cũ cho tới khi bạn bấm “Tạo voice”.`;
+        }
+      };
+    }
+
     $("#btn-voice").onclick = async (e) => {
       const btn = e.currentTarget;
       const text = ($("#voice-text").value || "").trim();
@@ -1670,10 +1686,26 @@
         });
         state.project = res.project;
         const voice = res.voice || {};
-        toast("Đã tạo voice", "ok");
+        const applied = voice.applied !== false;
+        toast(applied ? `Đã tạo voice · ${voice.voice}` : "Đã tạo voice bằng giọng hệ thống (edge-tts chưa dùng được)", applied ? "ok" : "warn");
         const player = $("#voice-player");
-        if (player) player.innerHTML = `<audio controls src="${esc(voice.url)}" style="width:100%"></audio>`;
-        if (status) status.textContent = `${voice.engine} · ${voice.voice} · ${Math.round((voice.bytes || 0) / 1024)} KB`;
+        if (player) {
+          // the file name changes on every generation, so the old take can never
+          // be replayed from cache after the user picks another voice
+          player.innerHTML = `<audio controls src="${esc(voice.url)}" style="width:100%"></audio>`;
+        }
+        if (status) {
+          status.innerHTML = `${esc(voice.engine)} · ${esc(applied ? voice.voice : "giọng hệ thống (chưa áp dụng en-US)")} · ${Math.round((voice.bytes || 0) / 1024)} KB`;
+        }
+        const warn = $("#voice-warn");
+        if (warn) warn.remove();
+        if (!applied && status && status.parentElement) {
+          const note = document.createElement("div");
+          note.className = "warn-line";
+          note.id = "voice-warn";
+          note.textContent = voice.note || "Giọng en-US bạn chọn chưa áp dụng được — edge-tts cần Internet.";
+          status.parentElement.insertBefore(note, status.nextSibling);
+        }
         const row = btn.parentElement;
         const existing = row.querySelector("a[download]");
         if (existing) existing.remove();
@@ -1688,6 +1720,7 @@
         if (status) status.textContent = err.message;
       } finally {
         btn.disabled = false;
+        btn.classList.remove("is-hot");
         btn.innerHTML = `${ICON.mic} Tạo voice`;
       }
     };
