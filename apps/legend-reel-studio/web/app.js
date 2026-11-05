@@ -863,6 +863,7 @@
   const RIVAL_SCAN_STATUS = {
     ok: { label: "đọc được", cls: "tag-ok" },
     blocked: { label: "Facebook chặn", cls: "tag-warn" },
+    denied: { label: "bị từ chối (HTTP 400)", cls: "tag-warn" },
     empty: { label: "không thấy bài", cls: "tag-warn" },
     error: { label: "lỗi mạng", cls: "tag-danger" },
   };
@@ -874,7 +875,7 @@
         <summary class="tiny muted">Nhật ký ${attempts.length} lần thử</summary>
         <ul class="rival-steps" style="margin-top:8px">
           ${attempts
-            .map((a) => `<li><b>${esc(a.label)}</b> · ${esc(a.ua)}${a.cookie ? " · có cookie" : ""} · HTTP ${esc(a.status || "—")} · ${fmtNum(a.size)} byte · ${esc(a.posts)} bài${a.note ? ` · <span class="muted">${esc(a.note)}</span>` : ""}</li>`)
+            .map((a) => `<li><b>${esc(a.label)}</b> · ${esc(a.transport || a.ua)}${a.cookie ? " · có cookie" : ""} · HTTP ${esc(a.status || "—")} · ${fmtNum(a.size)} byte · ${esc(a.posts)} bài${a.note ? ` · <span class="muted">${esc(a.note)}</span>` : ""}${a.snippet ? `<div class="tiny muted" style="margin:2px 0 0 2px;opacity:.75">“${esc(String(a.snippet).slice(0, 130))}…”</div>` : ""}</li>`)
             .join("")}
         </ul>
       </details>`;
@@ -890,7 +891,8 @@
     if (data.filtered_out) bits.push(`loại ${data.filtered_out} bài chưa đủ nổi`);
     if (data.skipped) bits.push(`bỏ ${data.skipped} bài đã có trong danh sách`);
     const session = data.session || {};
-    const cookieBox = data.needs_session
+    const showCookie = data.needs_session || data.status === "blocked" || data.status === "denied";
+    const cookieBox = showCookie
       ? `
       <div class="rpage-session" style="margin-top:12px;padding:12px;border:1px solid var(--line);border-radius:12px;background:rgba(255,255,255,0.02)">
         <div class="tiny" style="margin-bottom:6px">
@@ -898,12 +900,12 @@
           Dán cookie <b>một lần</b>, từ đó mỗi lần chỉ cần dán link page.
         </div>
         <ol class="rival-steps">
-          <li>Mở <a href="https://www.facebook.com" target="_blank" rel="noopener">facebook.com</a> (đang đăng nhập) → <b>F12</b> → tab <b>Application</b> (Chrome) hoặc <b>Storage</b> (Firefox).</li>
-          <li>Mục <b>Cookies</b> → <code>https://www.facebook.com</code> → copy giá trị <code>c_user</code> và <code>xs</code>.</li>
-          <li>Dán vào ô dưới dạng <code>c_user=…; xs=…</code> → studio đọc lại page ngay.</li>
+          <li>Mở <a href="https://www.facebook.com" target="_blank" rel="noopener">facebook.com</a> khi đang đăng nhập → <b>F12</b> → tab <b>Network</b> → tải lại trang.</li>
+          <li>Chọn request <code>facebook.com</code> đầu tiên → <b>Headers</b> → <b>Request Headers</b> → copy <b>toàn bộ</b> dòng <code>cookie:</code> (dài, có <code>datr</code>, <code>sb</code>, <code>c_user</code>, <code>xs</code>…).</li>
+          <li>Dán vào ô dưới → studio lưu và đọc lại page ngay. (Chỉ copy <code>c_user</code> + <code>xs</code> cũng được, nhưng dễ bị Facebook coi là thiếu phiên.)</li>
         </ol>
         <div class="row" style="gap:8px;flex-wrap:wrap">
-          <input class="input" id="rale-cookie" placeholder="c_user=615655…; xs=…" style="flex:1;min-width:240px" />
+          <textarea class="textarea" id="rale-cookie" placeholder="datr=…; sb=…; c_user=615655…; xs=…" style="flex:1;min-width:240px;min-height:64px"></textarea>
           <button class="btn btn-primary btn-sm" id="rale-cookie-save">Lưu &amp; đọc lại</button>
           ${session.saved ? `<button class="btn btn-ghost btn-sm" id="rale-cookie-clear">Xoá cookie đã lưu</button>` : ""}
         </div>
@@ -982,6 +984,15 @@
               Studio gọi thẳng facebook.com từ máy bạn, đọc phần công khai của page, chấm điểm rồi chỉ giữ bài đã nổi.
               Không gửi link hay nội dung cho bên thứ ba. Facebook có thể đòi phiên đăng nhập — khi đó dán cookie một lần là xong.
             </div>
+            ${(() => {
+              const t = state.boot?.rivals?.transports || {};
+              if (t.curl_cffi !== false) return "";
+              return `<div class="banner-tip" style="margin:0 0 10px;color:#ffb4b4">
+                Thiếu <code>curl_cffi</code> nên máy chủ chưa giả lập được Chrome — Facebook sẽ trả HTTP 400.
+                Chạy <code>pip install -r requirements.txt</code> (hoặc <code>pip install curl_cffi httpx[http2]</code>) rồi khởi động lại studio.
+                Trong lúc chờ, dùng 2 cách bên dưới (tải HTML trang lên / nút bookmark).
+              </div>`;
+            })()}
             <div class="row" style="gap:10px;align-items:center;flex-wrap:wrap">
               <label class="tiny muted" style="display:flex;gap:6px;align-items:center">
                 <input type="checkbox" id="rpage-only-viral" checked /> chỉ giữ bài đã nổi (điểm ≥ 65)
@@ -989,6 +1000,29 @@
               <span class="tiny muted" id="rpage-hint"></span>
             </div>
             <div id="rpage-result"></div>
+
+            <div class="rpage-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px">
+              <div style="padding:12px;border:1px solid var(--line);border-radius:12px;background:rgba(255,255,255,0.02)">
+                <div class="tiny" style="font-weight:600;margin-bottom:4px">① Tải trang HTML lên — chắc chắn nhất</div>
+                <div class="tiny muted" style="margin-bottom:8px">
+                  Mở page đối thủ → cuộn vài lần → <b>Ctrl+S</b> (“Webpage, HTML only”) → chọn file ở đây.
+                  Trang bạn lưu đã đăng nhập nên có đủ số liệu; studio bóc reel đã nổi từ đó.
+                </div>
+                <input class="input" type="file" id="rpage-html" accept=".html,.htm,text/html" />
+                <div class="tiny muted" id="rpage-html-hint" style="margin-top:6px"></div>
+              </div>
+              <div style="padding:12px;border:1px solid var(--line);border-radius:12px;background:rgba(255,255,255,0.02)">
+                <div class="tiny" style="font-weight:600;margin-bottom:4px">② Nút bookmark — một cú bấm trên page</div>
+                <div class="tiny muted" style="margin-bottom:8px">
+                  Kéo nút dưới lên thanh bookmark, mở page đối thủ rồi bấm nút. Không cần F12, không bị Facebook chặn dán mã.
+                </div>
+                <div class="row" style="gap:8px;flex-wrap:wrap">
+                  <a class="btn btn-primary btn-sm" id="rpage-book" draggable="true" href="#">${ICON.link} Lấy reel page này</a>
+                  <button class="btn btn-ghost btn-sm" id="rpage-book-copy">Copy mã</button>
+                </div>
+                <div class="tiny muted" id="rpage-book-hint" style="margin-top:6px"></div>
+              </div>
+            </div>
 
             <details style="margin-top:14px">
               <summary class="tiny muted" style="cursor:pointer">Facebook chặn hoặc bạn muốn tự dán số liệu</summary>
@@ -1077,6 +1111,56 @@
       }
     };
     $("#rpage-scan").onclick = scan;
+
+    const fileInput = $("#rpage-html");
+    if (fileInput) {
+      fileInput.onchange = async () => {
+        const file = (fileInput.files || [])[0];
+        if (!file) return;
+        const hint = $("#rpage-html-hint");
+        hint.textContent = `Đang đọc ${file.name} (${fmtNum(file.size)} byte)…`;
+        try {
+          const html = await file.text();
+          const res = await api("/api/rivals/from-html", {
+            method: "POST",
+            body: {
+              html,
+              page_url: (pageInput.value || "").trim(),
+              only_viral: $("#rpage-only-viral").checked,
+            },
+          });
+          hint.textContent = `đọc ${res.scanned} bài · nhập ${res.added}${res.filtered_out ? ` · loại ${res.filtered_out} bài chưa đủ nổi` : ""}`;
+          toast(`Đã nhập ${res.added} reel từ HTML của trang`, res.added ? "ok" : "err");
+          if (res.added && reload) await reload();
+        } catch (err) {
+          hint.textContent = "";
+          toast(err.message, "err");
+        }
+      };
+    }
+
+    const bookLink = $("#rpage-book");
+    if (bookLink) {
+      api("/api/rivals/bookmarklet")
+        .then((info) => {
+          bookLink.href = info.href;
+          const hint = $("#rpage-book-hint");
+          if (hint) hint.textContent = `Trỏ về ${info.origin}`;
+        })
+        .catch((err) => {
+          bookLink.onclick = (event) => {
+            event.preventDefault();
+            toast(`Không tạo được nút bookmark: ${err.message}`, "err");
+          };
+        });
+      const copyBook = $("#rpage-book-copy");
+      if (copyBook) {
+        copyBook.onclick = () => {
+          if (!bookLink.href || bookLink.href === "#") return toast("Nút bookmark chưa sẵn sàng", "err");
+          copyText(bookLink.href, "Đã copy mã bookmark — tạo bookmark mới và dán vào ô URL");
+        };
+      }
+    }
 
     $("#rpage-copy").onclick = async () => {
       try {

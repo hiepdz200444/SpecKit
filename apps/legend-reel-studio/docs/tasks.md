@@ -85,6 +85,13 @@
 - [x] T059 Sửa race điều hướng: `route()` xếp hàng render để màn cũ không ghi đè màn mới (jsdom smoke hết flaky)
 - [x] T060 Test: `tests/test_fb_fetch.py` (22 test: URL/profie id/link một bài, bóc JSON + `role="article"` + og, gộp bài trùng, tường đăng nhập, cookie, HTTP thật qua server nội bộ, endpoint) → **113 pytest**; jsdom smoke **86 check** (thêm 6 check cho luồng quét page + fallback cookie)
 
+## Phase 9: Vượt chặn HTTP 400 của Facebook
+
+- [x] T061 Ba transport (`curl_cffi` giả lập TLS/HTTP2 Chrome → `httpx` HTTP/2 → HTTP/1.1) + `transport_status()`/`available_transport()`; nhật ký thử ghi kiểu client; trạng thái mới `denied` cho HTTP 400/403; `needs_session` giữ nguyên logic
+- [x] T062 Cookie phiên giữ **toàn bộ** chuỗi cookie của facebook.com (bỏ khóa rác, cắt 4000 ký tự); hướng dẫn copy cả dòng `cookie:` từ F12 → Network
+- [x] T063 `POST /api/rivals/from-html` (HTML lưu bằng Ctrl+S, bóc JSON nhúng + DOM) và `GET /api/rivals/bookmarklet` (một dòng `javascript:` từ `fb-extract.js`, trỏ về origin studio); bookmarklet có alert kết quả + dự phòng copy JSON
+- [x] T064 UI: nhật ký hiện cả đoạn HTML Facebook trả về, ô tải file HTML, nút bookmark kéo được, cảnh báo thiếu `curl_cffi`; `requirements.txt` thêm `curl_cffi` + `httpx[http2]`; bump 2.5.0 (121 pytest, 90 jsdom check)
+
 ## Backlog (chưa làm)
 
 - [ ] T034 Đăng trực tiếp qua Facebook Graph API (cần quyền Page)

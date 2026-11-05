@@ -17,7 +17,7 @@
  * không gửi dữ liệu đi đâu ngoài máy chủ studio của bạn).
  */
 (async () => {
-  const STUDIO = "http://127.0.0.1:8000";
+  const STUDIO = window.__LRS_STUDIO__ || "http://127.0.0.1:8000";
   const PAGE_URL = location.origin + location.pathname;
 
   const ARTICLES = 'div[role="article"], [data-ad-preview="message"]';
@@ -139,7 +139,16 @@
   console.log(
     sent
       ? `✅ Đã gửi ${posts.length} bài về studio (chỉ giữ bài đã nổi). Mở studio → Reels đối thủ.`
-      : `📋 Đã copy ${posts.length} bài. Mở studio → Reels đối thủ → "Từ link page Facebook" → dán vào ô JSON.`
+      : `📋 Đã copy ${posts.length} bài. Mở studio → Reels đối thủ → "Facebook chặn" → dán JSON.`
   );
+  try {
+    alert(
+      sent
+        ? `Studio đã nhận ${posts.length} bài từ page này.\nQuay lại tab studio → Reels đối thủ để xem bài đã nổi.`
+        : `Đã copy ${posts.length} bài vào clipboard.\nDán vào studio → Reels đối thủ → ô JSON.`
+    );
+  } catch (err) {
+    /* bỏ qua khi trình duyệt chặn alert */
+  }
   return posts;
 })();

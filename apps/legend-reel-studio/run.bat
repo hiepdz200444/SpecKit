@@ -30,7 +30,7 @@ if not exist ".venv" (
   )
 )
 
-".venv\Scripts\python.exe" -c "import fastapi, PIL, edge_tts, multipart" >nul 2>nul
+".venv\Scripts\python.exe" -c "import fastapi, PIL, edge_tts, multipart, curl_cffi, httpx, h2" >nul 2>nul
 if errorlevel 1 (
   echo -^> Cai dependencies ^(lan dau co the mat 1-2 phut^)
   ".venv\Scripts\python.exe" -m pip install -q --upgrade pip

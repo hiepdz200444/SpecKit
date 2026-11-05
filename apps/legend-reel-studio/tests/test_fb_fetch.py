@@ -99,11 +99,23 @@ def test_page_variants_cover_reels_videos_and_wall():
 
 def test_plan_attempts_uses_saved_session_first():
     plans = fb_fetch.plan_attempts(PAGE, "c_user=1; xs=abc")
-    assert plans[0][0] == "reels" and plans[0][3] == "c_user=1; xs=abc"
-    assert plans[0][2] == fb_fetch.UA_BROWSER
+    assert plans[0]["label"] == "reels · phiên của bạn"
+    assert plans[0]["cookie"] == "c_user=1; xs=abc"
+    assert plans[0]["transport"] == "impersonate"  # TLS giả lập Chrome, không phải UA trần
+    assert plans[0]["ua"] == ""  # curl_cffi tự đặt UA khớp dấu vân tay
+    assert any(plan["label"].startswith("mbasic") for plan in plans)
+
     no_cookie = fb_fetch.plan_attempts(PAGE, "")
-    assert all(cookie == "" for _, _, _, cookie in no_cookie)
-    assert {"reels · googlebot", "reels · facebookhit"} <= {label for label, *_ in no_cookie}
+    assert all(plan["cookie"] == "" for plan in no_cookie)
+    labels = {plan["label"] for plan in no_cookie}
+    assert {"reels · chrome", "reels · http2", "reels · googlebot", "reels · facebookhit"} <= labels
+    assert {plan["transport"] for plan in no_cookie} >= {"impersonate", "http2", "plain"}
+
+
+def test_plan_attempts_for_a_single_reel_reads_only_that_post():
+    reel = "https://www.facebook.com/reel/123456789"
+    labels = [plan["label"] for plan in fb_fetch.plan_attempts(reel, "")]
+    assert labels and all(label.startswith("bài đơn") for label in labels)
 
 
 # --------------------------------------------------------------------------- #
@@ -189,16 +201,21 @@ def test_looks_blocked_detects_login_wall_but_not_real_feed():
 # --------------------------------------------------------------------------- #
 # cookie phiên (một lần)                                                       #
 # --------------------------------------------------------------------------- #
+def test_parse_cookie_skips_junk_keys():
+    parsed = fb_fetch.parse_cookie("cookie: nope; path=/; domain=.facebook.com; c_user=1; xs=2; empty=")
+    assert parsed == {"c_user": "1", "xs": "2"}
+
+
 def test_cookie_roundtrip_and_masking(tmp_path, monkeypatch):
     monkeypatch.setattr(fb_fetch, "SESSION_PATH", str(tmp_path / "fb_session.json"))
     monkeypatch.delenv("FB_COOKIE", raising=False)
     assert fb_fetch.load_cookie() == ""
-    status = fb_fetch.save_cookie("c_user=61565; xs=secret; foreign=1")
+    status = fb_fetch.save_cookie("c_user=61565; xs=secret; datr=abc; fr=0xyz")
     assert status["saved"] and status["has_xs"]
-    assert status["cookies"] == ["c_user", "xs"]
+    assert status["cookies"] == ["c_user", "xs", "datr", "fr"]
     assert "secret" not in json.dumps(status)
     header = fb_fetch.load_cookie()
-    assert header == "c_user=61565; xs=secret"  # cookie site khác bị bỏ
+    assert header == "c_user=61565; xs=secret; datr=abc; fr=0xyz"  # giữ cả bộ cookie phiên
     cleared = fb_fetch.clear_cookie()
     assert cleared["saved"] is False
 
@@ -209,8 +226,8 @@ def test_cookie_roundtrip_and_masking(tmp_path, monkeypatch):
 def test_scan_page_reports_blocked_when_facebook_wants_a_login(monkeypatch):
     calls = []
 
-    def fake_get(url, ua, cookie="", timeout=0):
-        calls.append((url, ua, cookie))
+    def fake_get(url, ua, cookie="", timeout=0, transport="plain"):
+        calls.append((url, ua, cookie, transport))
         return 200, url, LOGIN_WALL, ""
 
     monkeypatch.setattr(fb_fetch, "_http_get", fake_get)
@@ -223,12 +240,14 @@ def test_scan_page_reports_blocked_when_facebook_wants_a_login(monkeypatch):
     assert all(attempt["blocked"] for attempt in scan["attempts"])
     assert "cookie phiên" in fb_fetch.explain(scan)
     assert calls[0][0] == f"{PAGE}/reels/"
+    assert calls[0][3] == "impersonate"
+    assert scan["attempts"][0]["transport"] == "Chrome giả lập"
 
 
 def test_scan_page_stops_at_the_first_target_with_posts(monkeypatch):
     feed = _feed_html(_video("4444", views=500_000, likes=9_000, comments=400, shares=90))
 
-    def fake_get(url, ua, cookie="", timeout=0):
+    def fake_get(url, ua, cookie="", timeout=0, transport="plain"):
         if url.endswith("/reels/"):
             return 200, url, feed, ""
         return 200, url, LOGIN_WALL, ""
@@ -244,7 +263,9 @@ def test_scan_page_stops_at_the_first_target_with_posts(monkeypatch):
 
 def test_scan_page_marks_network_errors(monkeypatch):
     monkeypatch.setattr(
-        fb_fetch, "_http_get", lambda url, ua, cookie="", timeout=0: (0, url, "", "ConnectError: boom")
+        fb_fetch,
+        "_http_get",
+        lambda url, ua, cookie="", timeout=0, transport="plain": (0, url, "", "ConnectError: boom"),
     )
     scan = fb_fetch.scan_page(PAGE, cookie="", max_attempts=2)
     assert scan["status"] == "error"
@@ -358,6 +379,13 @@ import socketserver  # noqa: E402
 import threading  # noqa: E402
 
 
+def _header(headers, name: str) -> str:
+    for key, value in headers.items():
+        if key.lower() == name.lower():
+            return value
+    return ""
+
+
 class _FakeFacebook(http.server.BaseHTTPRequestHandler):
     html = ""
     status = 200
@@ -432,3 +460,86 @@ def test_scan_page_reports_blocked_on_403(fake_facebook, monkeypatch):
     assert scan["status"] == "blocked"
     assert scan["attempts"][0]["status"] == 403
     assert scan["attempts"][0]["snippet"]
+
+
+def test_impersonate_transport_reaches_the_page(fake_facebook):
+    """curl_cffi giả lập Chrome thật — đường chính để Facebook không trả 400."""
+    pytest.importorskip("curl_cffi")
+    _FakeFacebook.html = _feed_html(_video("9393", views=77_000, likes=900))
+    status, final_url, text, error = fb_fetch._http_get(
+        f"{fake_facebook}/page/reels/", "", "", fb_fetch.DEFAULT_TIMEOUT_S, "impersonate"
+    )
+    assert error == "" and status == 200
+    assert '"video_id"' in text
+    path, headers = _FakeFacebook.seen[-1]
+    assert path == "/page/reels/"
+    # curl_cffi đặt UA + sec-ch-ua khớp dấu vân tay Chrome
+    assert _header(headers, "user-agent").lower().startswith("mozilla/5.0")
+    assert "chrome" in _header(headers, "sec-ch-ua").lower()
+
+
+def test_impersonate_falls_back_when_curl_cffi_is_missing(fake_facebook, monkeypatch):
+    _FakeFacebook.html = _feed_html(_video("9494", views=1000, likes=10))
+
+    def missing(*args, **kwargs):
+        raise ImportError("No module named 'curl_cffi'")
+
+    monkeypatch.setattr(fb_fetch, "_get_impersonate", missing)
+    status, _url, text, error = fb_fetch._http_get(
+        f"{fake_facebook}/p", fb_fetch.UA_BROWSER, "", 5, "impersonate"
+    )
+    assert error == "" and status == 200 and '"video_id"' in text
+
+
+def test_http_400_is_reported_as_denied(fake_facebook, monkeypatch):
+    _FakeFacebook.status = 400
+    _FakeFacebook.html = "<html><body>Bad Request</body></html>"
+    monkeypatch.setattr(
+        fb_fetch, "page_variants", lambda url: [("reels", f"{fake_facebook}/page/reels/")]
+    )
+    scan = fb_fetch.scan_page("http://127.0.0.1/page", cookie="", max_attempts=3)
+    assert scan["status"] == "denied"
+    assert scan["needs_session"] is True
+    assert any("HTTP 400" in attempt["note"] for attempt in scan["attempts"])
+    assert "HTTP 400" in fb_fetch.explain(scan)
+
+
+# --------------------------------------------------------------------------- #
+# Tải HTML trang lên + bookmarklet (đường không cần DevTools)                   #
+# --------------------------------------------------------------------------- #
+def test_from_html_endpoint_reads_a_saved_page():
+    vid = str(uuid.uuid4().int)[:10]
+    html = _feed_html(
+        _video(vid, views=1_500_000, likes=40_000, comments=900, shares=300,
+               text=f"The tape rolled and nobody in the room knew it was history {vid}")
+    )
+    res = client.post(
+        "/api/rivals/from-html",
+        json={"html": html, "page_url": PAGE, "only_viral": True},
+    )
+    assert res.status_code == 200
+    data = res.json()
+    assert data["scanned"] == 1 and data["added"] == 1
+    reel = data["reels"][0]
+    assert reel["views"] == 1_500_000
+    assert reel["source_page"] == "facebook.com/OldSchoolMusicPage"
+
+
+def test_from_html_rejects_a_file_without_reels():
+    short = client.post("/api/rivals/from-html", json={"html": "<html></html>"})
+    assert short.status_code == 400
+    empty = client.post("/api/rivals/from-html", json={"html": "<html><body>" + "x" * 400 + "</body></html>"})
+    assert empty.status_code == 400
+    assert "reel" in empty.json()["detail"]
+
+
+def test_bookmarklet_endpoint_builds_a_javascript_url():
+    import urllib.parse
+
+    data = client.get("/api/rivals/bookmarklet").json()
+    assert data["href"].startswith("javascript:")
+    code = urllib.parse.unquote(data["href"][len("javascript:"):])
+    assert 'const STUDIO = "http://testserver"' in code
+    assert 'role="article"' in code
+    assert "/api/rivals/from-page" in code
+    assert "\n" not in code  # một dòng để dán vào bookmark

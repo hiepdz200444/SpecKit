@@ -3,6 +3,12 @@ fastapi>=0.115
 uvicorn[standard]>=0.30
 pillow>=10.4
 python-multipart>=0.0.9
+httpx[http2]>=0.27
+
+# đọc page Facebook: curl_cffi giả lập TLS + HTTP/2 của Chrome.
+# Không có gói này Facebook trả HTTP 400 cho client Python, nên studio vẫn chạy
+# được nhưng chỉ còn đường tải HTML trang lên / bookmarklet.
+curl_cffi>=0.7
 
 # voiceover: edge-tts = neural en-US voices (needs internet),
 # pyttsx3 = offline fallback using the system voice

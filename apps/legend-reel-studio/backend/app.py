@@ -12,6 +12,7 @@ import subprocess
 import time
 import zipfile
 from datetime import date, datetime, timezone
+from urllib.parse import quote
 
 from fastapi import Body, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -39,7 +40,7 @@ IMAGE_ID_RE = re.compile(r"^[a-f0-9]{8,32}$")
 for d in (DATA_DIR, IMAGE_DIR, VOICE_DIR):
     os.makedirs(d, exist_ok=True)
 
-APP_VERSION = "2.4.0"
+APP_VERSION = "2.5.0"
 _COMMIT_CACHE: dict[str, str] = {}
 
 
@@ -80,6 +81,9 @@ def version_info() -> dict:
             "rivals-remake",
             "rivals-page-import",
             "rivals-page-scan",
+            "rivals-chrome-impersonate",
+            "rivals-from-html",
+            "rivals-bookmarklet",
             "rivals-session",
             "facebook-page-extractor",
             "article-by-name",
@@ -209,6 +213,7 @@ def bootstrap(day: str = Query(default="")):
         "rivals": {
             "count": len(db.list_rivals()),
             "session": fb_fetch.cookie_status(),
+            "transports": fb_fetch.transport_status(),
             "platforms": rivals_mod.PLATFORMS,
             "formats": rivals_mod.FORMATS,
             "platform_labels": rivals_mod.PLATFORM_LABEL,
@@ -921,6 +926,8 @@ def scan_rivals_page(payload: dict = Body(...)):
         "needs_session": scan.get("needs_session", False),
         "elapsed_ms": scan.get("elapsed_ms", 0),
         "session": fb_fetch.cookie_status(),
+        "transports": scan.get("transports") or [],
+        "capabilities": scan.get("capabilities") or fb_fetch.transport_status(),
         "reels": [],
         "added": 0,
         "skipped": 0,
@@ -972,6 +979,65 @@ def clear_rivals_session():
     return fb_fetch.clear_cookie()
 
 
+def _reels_from_html(html: str, page_url: str = "") -> list[dict]:
+    """Bóc reel từ HTML người dùng lưu (Ctrl+S) — thử cả JSON nhúng lẫn DOM."""
+    items = fb_fetch.extract_posts(html, page_url)
+    items += rivals_mod.posts_from_html(html, page_url)
+    return items
+
+
+@app.post("/api/rivals/from-html")
+def import_from_html(payload: dict = Body(...)):
+    """Nhập từ HTML của trang Facebook (Ctrl+S) — không cần DevTools.
+
+    Đây là đường chắc chắn nhất khi Facebook chặn máy chủ: trang bạn lưu đã là
+    bản đã đăng nhập, có đủ số liệu trong DOM và trong JSON nhúng.
+    """
+    html = str(payload.get("html") or "")
+    if len(html.strip()) < 200:
+        raise HTTPException(400, "File HTML quá nhỏ — hãy lưu nguyên trang (Ctrl+S) rồi thử lại")
+    page_url = rivals_mod.normalize_page_url(payload.get("page_url") or "")
+    label = rivals_mod.page_label(page_url) if page_url else ""
+    items = _reels_from_html(html, page_url)
+    if not items:
+        raise HTTPException(
+            400,
+            "Không thấy reel nào trong file HTML. Hãy mở đúng tab reels/videos của page, cuộn vài lần rồi lưu trang.",
+        )
+    saved = _save_page_items(
+        items,
+        page_url,
+        label,
+        only_viral=bool(payload.get("only_viral", True)),
+        min_score=int(payload.get("min_score") or 0),
+    )
+    return {**saved, "page_url": page_url, "page_label": label, "scanned": len(items), "errors": []}
+
+
+@app.get("/api/rivals/bookmarklet")
+def rivals_bookmarklet(request: Request):
+    """Một dòng `javascript:` để kéo lên thanh bookmark (không cần DevTools).
+
+    Nội dung lấy từ `web/assets/fb-extract.js` (một nguồn duy nhất), thay địa chỉ
+    studio bằng origin đang mở, bỏ chú thích và gộp thành một dòng.
+    """
+    source_path = os.path.join(WEB_DIR, "assets", "fb-extract.js")
+    try:
+        with open(source_path, "r", encoding="utf-8") as handle:
+            source = handle.read()
+    except OSError as exc:  # pragma: no cover - chỉ khi thiếu file
+        raise HTTPException(500, f"Không đọc được fb-extract.js: {exc}") from exc
+    source = re.sub(r"/\*.*?\*/", "", source, flags=re.S)
+    origin = str(request.base_url).rstrip("/")
+    source = re.sub(r"const STUDIO = [^;]+;", f'const STUDIO = "{origin}";', source, count=1)
+    code = " ".join(line.strip() for line in source.splitlines() if line.strip())
+    return {
+        "href": "javascript:" + quote(code, safe=""),
+        "origin": origin,
+        "length": len(code),
+    }
+
+
 @app.post("/api/rivals/from-page")
 def import_from_page(payload: dict = Body(...)):
     """Ba đường nhập tay khi Facebook không cho máy chủ đọc page.
@@ -989,7 +1055,7 @@ def import_from_page(payload: dict = Body(...)):
     if isinstance(payload.get("posts"), list):
         items += rivals_mod.from_posts(payload["posts"], page_url)
     if payload.get("html"):
-        items += rivals_mod.posts_from_html(payload["html"], page_url)
+        items += _reels_from_html(str(payload["html"]), page_url)
     if isinstance(payload.get("items"), list):
         items += [_reel_record(i, label) for i in payload["items"] if isinstance(i, dict)]
     if not items:

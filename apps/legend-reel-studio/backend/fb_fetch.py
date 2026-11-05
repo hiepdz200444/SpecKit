@@ -58,9 +58,6 @@ UA_LABEL = {
 # --------------------------------------------------------------------------- #
 # cookie phiên (tuỳ chọn, lưu cục bộ)                                          #
 # --------------------------------------------------------------------------- #
-_COOKIE_KEEP = ("c_user", "xs", "datr", "sb", "fr", "presence", "wd", "dpr")
-
-
 def parse_cookie(raw: str) -> dict[str, str]:
     """`c_user=1; xs=abc` → {'c_user': '1', 'xs': 'abc'}."""
     out: dict[str, str] = {}
@@ -68,19 +65,21 @@ def parse_cookie(raw: str) -> dict[str, str]:
         if "=" not in part:
             continue
         key, value = part.split("=", 1)
-        key, value = key.strip(), value.strip().strip('"')
-        if key and value:
+        key, value = key.strip().strip('"'), value.strip().strip('"')
+        if key and value and key.lower() not in ("cookie", "path", "domain", "expires"):
             out[key] = value
     return out
 
 
 def cookie_header(raw: str) -> str:
-    """Giữ lại các cookie Facebook cần, bỏ cookie của site khác."""
+    """Giữ toàn bộ cookie Facebook người dùng dán (c_user, xs, datr, sb, fr, …).
+
+    Phiên Facebook cần cả bộ cookie mới ổn định, nên chỉ bỏ những cặp rỗng và
+    cắt bớt nếu chuỗi quá dài.
+    """
     parsed = parse_cookie(raw)
-    kept = {k: v for k, v in parsed.items() if k in _COOKIE_KEEP}
-    if not kept:
-        kept = parsed
-    return "; ".join(f"{k}={v}" for k, v in kept.items())
+    header = "; ".join(f"{key}={value}" for key, value in parsed.items())
+    return header[:4000]
 
 
 def load_cookie() -> str:
@@ -141,14 +140,28 @@ def cookie_status() -> dict[str, Any]:
 
 
 # --------------------------------------------------------------------------- #
-# HTTP                                                                        #
+# HTTP: ba kiểu client, vì facebook.com phân biệt rất rõ                      #
 # --------------------------------------------------------------------------- #
+# Đo thực tế: cùng một URL, client Python mang UA Chrome bị trả thẳng HTTP 400
+# (lệch dấu vân tay TLS/HTTP2), còn UA crawler thì được 200 nhưng kèm tường đăng
+# nhập. Vì vậy mỗi URL được thử bằng ba kiểu client:
+#   impersonate → curl_cffi giả lập TLS + HTTP/2 của Chrome (giống trình duyệt thật)
+#   http2       → httpx với HTTP/2
+#   plain       → httpx/urllib HTTP/1.1
+TRANSPORT_LABEL = {
+    "impersonate": "Chrome giả lập",
+    "http2": "HTTP/2",
+    "plain": "HTTP thường",
+}
+
+
 @dataclass
 class Attempt:
     label: str
     url: str
     ua: str
     cookie: bool = False
+    transport: str = "plain"
     status: int = 0
     size: int = 0
     posts: int = 0
@@ -160,7 +173,8 @@ class Attempt:
         return {
             "label": self.label,
             "url": self.url,
-            "ua": UA_LABEL.get(self.ua, self.ua[:40]),
+            "ua": UA_LABEL.get(self.ua, self.ua[:40]) if self.ua else TRANSPORT_LABEL.get(self.transport, self.transport),
+            "transport": TRANSPORT_LABEL.get(self.transport, self.transport),
             "cookie": self.cookie,
             "status": self.status,
             "size": self.size,
@@ -171,40 +185,87 @@ class Attempt:
         }
 
 
+def transport_status() -> dict[str, Any]:
+    """Thư viện nào đang có — quyết định studio có đọc được Facebook hay không."""
+    try:
+        import curl_cffi  # type: ignore  # noqa: F401
+
+        impersonate = True
+    except ImportError:
+        impersonate = False
+    try:
+        import h2  # type: ignore  # noqa: F401
+
+        http2 = True
+    except ImportError:
+        http2 = False
+    return {
+        "curl_cffi": impersonate,
+        "http2": http2,
+        "recommended": "impersonate" if impersonate else ("http2" if http2 else "plain"),
+        "install": "" if impersonate else "pip install curl_cffi httpx[http2]",
+    }
+
+
+def available_transport(transport: str) -> str:
+    """Hạ cấp transport khi thiếu thư viện, để nhật ký ghi đúng thứ đã dùng."""
+    if transport == "impersonate":
+        return "impersonate" if transport_status()["curl_cffi"] else "http2"
+    if transport == "http2":
+        return "http2" if transport_status()["http2"] else "plain"
+    return transport
+
+
 def _headers(ua: str, cookie: str = "") -> dict[str, str]:
     headers = {
-        "User-Agent": ua,
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         "Accept-Language": "en-US,en;q=0.9,vi;q=0.8",
         "Cache-Control": "no-cache",
         "Pragma": "no-cache",
         "Upgrade-Insecure-Requests": "1",
     }
+    if ua:
+        headers["User-Agent"] = ua
     if cookie:
         headers["Cookie"] = cookie
     return headers
 
 
-def _http_get(url: str, ua: str, cookie: str = "", timeout: float = DEFAULT_TIMEOUT_S):
-    """(status, final_url, text, error). httpx nếu có, không thì urllib."""
+def _clip(text: str) -> str:
+    return (text or "")[:MAX_BYTES]
+
+
+def _get_impersonate(url: str, ua: str, cookie: str, timeout: float):
+    """curl_cffi: TLS + HTTP/2 giống Chrome thật (vượt qua kiểm tra client)."""
+    from curl_cffi import requests as curl_requests  # type: ignore
+
+    headers = {"Accept-Language": "en-US,en;q=0.9"}
+    if ua:
+        headers["User-Agent"] = ua
+    if cookie:
+        headers["Cookie"] = cookie
+    session = curl_requests.Session(impersonate="chrome")
     try:
-        import httpx  # type: ignore
+        response = session.get(url, headers=headers, timeout=timeout, allow_redirects=True)
+    finally:
+        session.close()
+    return response.status_code, str(response.url), _clip(response.text), ""
 
-        with httpx.Client(
-            follow_redirects=True,
-            timeout=timeout,
-            headers=_headers(ua, cookie),
-        ) as client:
-            response = client.get(url)
-            text = response.text
-            if len(text) > MAX_BYTES:
-                text = text[:MAX_BYTES]
-            return response.status_code, str(response.url), text, ""
-    except ImportError:
-        pass
-    except Exception as exc:  # noqa: BLE001 - mọi lỗi mạng đều thành "note"
-        return 0, url, "", f"{type(exc).__name__}: {exc}"
 
+def _get_httpx(url: str, ua: str, cookie: str, timeout: float, http2: bool):
+    import httpx  # type: ignore
+
+    with httpx.Client(
+        follow_redirects=True,
+        timeout=timeout,
+        headers=_headers(ua, cookie),
+        http2=http2,
+    ) as client:
+        response = client.get(url)
+        return response.status_code, str(response.url), _clip(response.text), ""
+
+
+def _get_urllib(url: str, ua: str, cookie: str, timeout: float):
     import urllib.error
     import urllib.request
 
@@ -220,6 +281,41 @@ def _http_get(url: str, ua: str, cookie: str = "", timeout: float = DEFAULT_TIME
         except Exception:  # noqa: BLE001
             body = ""
         return exc.code, url, body, ""
+
+
+def _http_get(
+    url: str,
+    ua: str,
+    cookie: str = "",
+    timeout: float = DEFAULT_TIMEOUT_S,
+    transport: str = "plain",
+):
+    """(status, final_url, text, error) — tự hạ cấp transport khi thiếu thư viện."""
+    if transport == "impersonate":
+        try:
+            return _get_impersonate(url, ua, cookie, timeout)
+        except ImportError:
+            transport = "http2"
+        except Exception as exc:  # noqa: BLE001
+            return 0, url, "", f"curl_cffi: {type(exc).__name__}: {exc}"
+
+    if transport == "http2":
+        try:
+            return _get_httpx(url, ua, cookie, timeout, True)
+        except ImportError:
+            transport = "plain"
+        except Exception as exc:  # noqa: BLE001
+            return 0, url, "", f"httpx: {type(exc).__name__}: {exc}"
+
+    try:
+        return _get_httpx(url, ua, cookie, timeout, False)
+    except ImportError:
+        pass
+    except Exception as exc:  # noqa: BLE001
+        return 0, url, "", f"httpx: {type(exc).__name__}: {exc}"
+
+    try:
+        return _get_urllib(url, ua, cookie, timeout)
     except Exception as exc:  # noqa: BLE001
         return 0, url, "", f"{type(exc).__name__}: {exc}"
 
@@ -574,20 +670,47 @@ def page_variants(page_url: str) -> list[tuple[str, str]]:
     ]
 
 
-def plan_attempts(page_url: str, cookie: str) -> list[tuple[str, str, str, str]]:
-    """[(nhãn, url, ua, cookie)] theo thứ tự thử."""
+def plan_attempts(page_url: str, cookie: str) -> list[dict[str, str]]:
+    """Thứ tự thử: có phiên thì thử phiên trước, rồi mới tới các UA crawler.
+
+    Mỗi lần thử là một bộ ba (URL, UA, transport) — vì facebook.com trả 400 cho
+    client Python mang UA Chrome, nhưng lại trả 200 cho UA crawler.
+    """
     variants = page_variants(page_url)
-    plans: list[tuple[str, str, str, str]] = []
+    if len(variants) == 1:  # link một bài: chỉ đọc đúng bài đó
+        label, url = variants[0]
+        plans = [
+            {"label": f"{label} · chrome", "url": url, "ua": "", "transport": "impersonate", "cookie": cookie},
+            {"label": f"{label} · http2", "url": url, "ua": UA_BROWSER, "transport": "http2", "cookie": cookie},
+            {"label": f"{label} · googlebot", "url": url, "ua": UA_GOOGLEBOT, "transport": "plain", "cookie": ""},
+        ]
+        return [plan for plan in plans if plan["cookie"] or not cookie]
+
+    by_label = {label: url for label, url in variants}
+    reels = by_label.get("reels") or variants[0][1]
+    videos = by_label.get("videos") or reels
+    wall = by_label.get("page") or reels
+    mbasic = re.sub(r"^https?://(?:www\.|web\.|m\.)?facebook\.com/", "https://mbasic.facebook.com/", wall)
+
+    plans: list[dict[str, str]] = []
     if cookie:
-        for label, url in variants:
-            plans.append((label, url, UA_BROWSER, cookie))
-    for label, url in variants[:2]:  # reels + videos
-        plans.append((f"{label} · chrome", url, UA_BROWSER, ""))
-        plans.append((f"{label} · googlebot", url, UA_GOOGLEBOT, ""))
-        plans.append((f"{label} · facebookhit", url, UA_FACEBOOK_HIT, ""))
-    label, url = variants[-1]
-    plans.append((f"{label} · chrome", url, UA_BROWSER, ""))
-    plans.append((f"{label} · facebookhit", url, UA_FACEBOOK_HIT, ""))
+        plans += [
+            {"label": "reels · phiên của bạn", "url": reels, "ua": "", "transport": "impersonate", "cookie": cookie},
+            {"label": "reels · phiên + googlebot", "url": reels, "ua": UA_GOOGLEBOT, "transport": "plain", "cookie": cookie},
+            {"label": "videos · phiên của bạn", "url": videos, "ua": "", "transport": "impersonate", "cookie": cookie},
+            {"label": "page · phiên của bạn", "url": wall, "ua": "", "transport": "impersonate", "cookie": cookie},
+        ]
+        if mbasic and mbasic != wall:
+            plans.append({"label": "mbasic · phiên của bạn", "url": mbasic, "ua": "", "transport": "impersonate", "cookie": cookie})
+
+    plans += [
+        {"label": "reels · chrome", "url": reels, "ua": "", "transport": "impersonate", "cookie": ""},
+        {"label": "reels · http2", "url": reels, "ua": UA_BROWSER, "transport": "http2", "cookie": ""},
+        {"label": "reels · googlebot", "url": reels, "ua": UA_GOOGLEBOT, "transport": "plain", "cookie": ""},
+        {"label": "videos · googlebot", "url": videos, "ua": UA_GOOGLEBOT, "transport": "plain", "cookie": ""},
+        {"label": "reels · facebookhit", "url": reels, "ua": UA_FACEBOOK_HIT, "transport": "plain", "cookie": ""},
+        {"label": "page · googlebot", "url": wall, "ua": UA_GOOGLEBOT, "transport": "plain", "cookie": ""},
+    ]
     return plans
 
 
@@ -600,12 +723,13 @@ def scan_page(
     cookie: str = "",
     budget_s: float = DEFAULT_BUDGET_S,
     timeout_s: float = DEFAULT_TIMEOUT_S,
-    max_attempts: int = 9,
+    max_attempts: int = 12,
 ) -> dict:
     """Đọc page và trả về bài thô + nhật ký.
 
-    `status`: `ok` (có bài) · `blocked` (Facebook đòi đăng nhập) · `empty`
-    (đọc được trang nhưng không có bài/số liệu) · `error` (lỗi mạng/URL).
+    `status`: `ok` (có bài) · `blocked` (Facebook đòi đăng nhập) · `denied`
+    (Facebook từ chối client máy chủ bằng HTTP 400) · `empty` (đọc được trang
+    nhưng không có bài/số liệu) · `error` (lỗi mạng/URL).
     """
     page_url = rivals_mod.normalize_page_url(page_url) or (page_url or "").strip()
     cookie = cookie_header(cookie)
@@ -613,14 +737,24 @@ def scan_page(
     attempts: list[Attempt] = []
     posts: list[dict] = []
     blocked_seen = False
+    denied_seen = False
 
-    for label, url, ua, cookie_value in plan_attempts(page_url, cookie):
+    for plan in plan_attempts(page_url, cookie):
         if len(attempts) >= max_attempts:
             break
         if time.monotonic() - started > budget_s:
             break
-        attempt = Attempt(label=label, url=url, ua=ua, cookie=bool(cookie_value))
-        status, final_url, html, error = _http_get(url, ua, cookie_value, timeout_s)
+        transport = available_transport(plan["transport"])
+        attempt = Attempt(
+            label=plan["label"],
+            url=plan["url"],
+            ua=plan["ua"],
+            cookie=bool(plan["cookie"]),
+            transport=transport,
+        )
+        status, final_url, html, error = _http_get(
+            plan["url"], plan["ua"], plan["cookie"], timeout_s, transport
+        )
         attempt.status = status
         attempt.size = len(html or "")
         if error:
@@ -631,16 +765,26 @@ def scan_page(
             if found:
                 posts.extend(found)
             attempt.snippet = html_to_text(html)[:180]
-            if not found and looks_blocked(html, status, final_url):
+            if found:
+                attempt.note = f"{len(found)} bài"
+            elif status == 400:
+                attempt.blocked = True
+                attempt.note = "HTTP 400 — Facebook chặn client máy chủ (kiểm tra TLS/bot)"
+                denied_seen = True
+            elif looks_blocked(html, status, final_url):
                 attempt.blocked = True
                 attempt.note = "Facebook trả trang đăng nhập thay vì nội dung"
                 blocked_seen = True
-            elif not found:
+            elif status in (403, 429):
+                attempt.blocked = True
+                attempt.note = f"HTTP {status} — bị chặn/tạm giới hạn"
+                denied_seen = True
+            else:
                 attempt.note = "không thấy bài/số liệu nào trong HTML"
         attempts.append(attempt)
-        if attempt.cookie and attempt.posts:
+        if attempt.posts >= 3:
             break
-        if attempt.posts >= 3 and not attempt.cookie:
+        if attempt.posts and time.monotonic() - started > budget_s * 0.6:
             break
 
     # gộp nhiều lần thử (reels + videos) và khử trùng
@@ -665,6 +809,8 @@ def scan_page(
         status_name = "ok"
     elif blocked_seen:
         status_name = "blocked"
+    elif denied_seen:
+        status_name = "denied"
     elif attempts and all(attempt.status == 0 for attempt in attempts):
         status_name = "error"
     else:
@@ -676,9 +822,11 @@ def scan_page(
         "page_label": rivals_mod.page_label(page_url) if page_url else "",
         "posts": final,
         "attempts": [attempt.as_dict() for attempt in attempts],
-        "needs_session": status_name in ("blocked", "empty") and not cookie,
+        "needs_session": status_name in ("blocked", "empty", "denied") and not cookie,
         "elapsed_ms": int((time.monotonic() - started) * 1000),
         "cookie_used": bool(cookie),
+        "transports": sorted({attempt.transport for attempt in attempts}),
+        "capabilities": transport_status(),
     }
 
 
@@ -689,13 +837,24 @@ def explain(scan: dict) -> str:
     if status == "ok":
         return f"Đọc được {len(scan.get('posts') or [])} bài từ {label}."
     if status == "blocked":
+        if scan.get("cookie_used"):
+            return (
+                f"Facebook vẫn trả trang đăng nhập cho {label} dù đã có cookie phiên — "
+                "cookie có thể đã hết hạn. Dán cookie mới, hoặc lấy bài bằng trình duyệt (2 nút bên dưới)."
+            )
         return (
             f"Facebook trả trang đăng nhập cho {label} thay vì nội dung. "
-            "Dán cookie phiên một lần (nút bên dưới) rồi bấm tìm lại — máy chủ sẽ đọc bằng chính phiên của bạn."
+            "Dán cookie phiên một lần rồi bấm tìm lại — máy chủ sẽ đọc bằng chính phiên của bạn."
+        )
+    if status == "denied":
+        return (
+            f"Facebook từ chối request từ máy chủ cho {label} (HTTP 400/403 — kiểm tra bot). "
+            "Cách chắc ăn: dán cookie phiên, kéo nút bookmark để đọc bằng trình duyệt, "
+            "hoặc tải trang HTML (Ctrl+S) lên studio."
         )
     if status == "empty":
         return (
             f"Đọc được HTML của {label} nhưng không thấy bài nào có số liệu. "
-            "Page có thể để chế độ riêng tư, hoặc Facebook chỉ trả khung rỗng — thử lưu cookie phiên."
+            "Page có thể để riêng tư, hoặc Facebook chỉ trả khung rỗng — thử cookie phiên hoặc tải HTML trang lên."
         )
     return f"Không gọi được Facebook cho {label}. Kiểm tra mạng rồi thử lại."

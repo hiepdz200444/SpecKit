@@ -141,7 +141,7 @@ async function main() {
               page_url: "https://www.facebook.com/OldSchoolMusicPage",
               page_label: "facebook.com/OldSchoolMusicPage",
               needs_session: true, cookie_used: false, elapsed_ms: 2400,
-              attempts: [{ label: "reels · chrome", url: "https://www.facebook.com/OldSchoolMusicPage/reels/", ua: "trình duyệt", cookie: false, status: 200, size: 48000, posts: 0, blocked: true, note: "Facebook trả trang đăng nhập thay vì nội dung" }],
+              attempts: [{ label: "reels · chrome", url: "https://www.facebook.com/OldSchoolMusicPage/reels/", ua: "trình duyệt", transport: "Chrome giả lập", cookie: false, status: 200, size: 48000, posts: 0, blocked: true, note: "Facebook trả trang đăng nhập thay vì nội dung", snippet: "Log into Facebook You must log in to continue." }],
               session: { saved: false, cookies: [] },
               reels: [], errors: [],
             }));
@@ -346,6 +346,11 @@ async function main() {
     await waitFor(() => $("#rale-cookie"), "cookie fallback box", 20000);
     ok(/Facebook chặn/.test($("#rpage-result").textContent), "khi bị chặn hiện nhãn Facebook chặn");
     ok(!!$("#rale-cookie-save"), "có ô dán cookie phiên + nút đọc lại");
+    ok(/Log into Facebook/.test($("#rpage-result").textContent), "nhật ký hiện cả đoạn Facebook trả về");
+    ok(!!$("#rpage-html"), "có ô tải trang HTML lên (đường không cần DevTools)");
+    ok(!!$("#rpage-book") && !!$("#rpage-book-copy"), "có nút bookmark + copy mã bookmark");
+    await waitFor(() => ($("#rpage-book").getAttribute("href") || "").startsWith("javascript:"), "bookmarklet href", 15000);
+    ok($("#rpage-book").getAttribute("href").includes("api%2Frivals%2Ffrom-page"), "bookmarklet trỏ về API của studio");
 
     const remakeCard = $$(".rival-card").find((c) => /Whitney/.test(c.textContent));
     ok(!!remakeCard, "tìm được card Whitney để làm lại");
