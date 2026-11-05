@@ -1,13 +1,13 @@
 # Feature Specification: Legends Reel Studio (v2 — không dựng video)
 
 **Feature Branch**: `arena/19d0d9ca-speckit`
-**Created**: 2026-11-04 · **Revised**: 2026-11-05 (thêm reel đối thủ + bài viết theo tên nhân vật)
+**Created**: 2026-11-04 · **Revised**: 2026-11-05 (thêm nhập reel từ link page Facebook)
 **Status**: Implemented (prototype)
 **Input**: "Trang quản lý, cập nhật nội dung reels Facebook cho thị trường Mỹ, chủ đề âm nhạc của các cố nghệ sĩ mà khán giả 30–60 tuổi hâm mộ. Tìm sự kiện trong ngày + bài nhạc liên quan; viết bài báo tiếng Anh 700–900 từ kèm link nhạc; gom 1 ảnh banner + 20 ảnh nghệ sĩ từ Wikipedia/Commons (có license) hoặc từ link người dùng dán vào; sinh chữ trên video 9–15 từ, hook Facebook, caption + comment pin; tạo voice tiếng Anh để nghe thử và tải .mp3. Không dựng video."
 
 ## Phạm vi
 
-**Trong phạm vi**: tìm sự kiện, thư viện nghệ sĩ, bài báo, bộ ảnh nghệ sĩ + banner, text đăng bài, voice TTS, quản lý dự án, xuất markdown/JSON, **theo dõi reel đối thủ đã nổi + làm lại**, **tạo bài viết bằng tên nhân vật bất kỳ**.
+**Trong phạm vi**: nhập reel từ link page đối thủ, tìm sự kiện, thư viện nghệ sĩ, bài báo, bộ ảnh nghệ sĩ + banner, text đăng bài, voice TTS, quản lý dự án, xuất markdown/JSON, **theo dõi reel đối thủ đã nổi + làm lại**, **tạo bài viết bằng tên nhân vật bất kỳ**.
 
 **Ngoài phạm vi (đã bỏ hẳn)**: render MP4, ffmpeg/imageio-ffmpeg, tổng hợp nhạc nền, preview điện thoại 9:16, job render + polling tiến độ, mọi nút render/tải MP4. Studio không tạo video.
 
@@ -155,6 +155,25 @@ Người vận hành muốn viết về một người không có trong thư vi�
 
 ---
 
+### User Story 7 - Đưa link page Facebook, studio tự lọc bài đã nổi (Priority: P1)
+
+Người vận hành có một page đối thủ cùng ngách. Họ dán link page vào studio, copy đoạn mã của studio, chạy nó trong Console của chính tab Facebook đang mở, thế là studio nhận về danh sách bài kèm số liệu và **chỉ giữ những bài đã nổi** — sẵn sàng bấm "Làm lại".
+
+**Why this priority**: Nhập tay từng reel rất chậm; đọc cả page một lần rồi lọc mới là cách dùng thật.
+
+**Independent Test**: Dán `facebook.com/OldSchoolMusicPage` → bấm "Copy mã lấy bài" → chạy mã trên page → studio thêm đúng các bài đạt ngưỡng, gắn nhãn page, bỏ bài trùng; lọc theo page còn đúng số bài; mỗi bài bấm "Làm lại" được.
+
+**Acceptance Scenarios**:
+
+1. **Given** một page có cả bài nổi và bài thường, **When** nhập với `only_viral`, **Then** chỉ bài ≥ 60 điểm được thêm; nếu cả page chưa bài nào đạt 60 thì giữ top 40% của page đó.
+2. **Given** bài đã có trong studio, **When** nhập lại cùng page, **Then** bài trùng (theo link hoặc hook) bị bỏ qua và báo số bài bỏ qua.
+3. **Given** số liệu viết `1,2 N`, `1.234`, `1.2K`, `2,4 Tr`, **When** nhập, **Then** quy đổi đúng.
+4. **Given** HTML lưu từ trang (`Ctrl+S`), **When** gửi vào `POST /api/rivals/from-page` với `html`, **Then** studio bóc được các khối `role="article"` kèm số liệu và link bài.
+5. **Given** nhiều page đối thủ, **When** mở danh sách, **Then** lọc được theo page và thấy số bài của từng page.
+6. **Given** yêu cầu không scrape, **When** nhập, **Then** máy chủ KHÔNG gọi Facebook; mọi dữ liệu đến từ trình duyệt của người dùng hoặc do người dùng dán.
+
+---
+
 ### Functional Requirements
 
 - **FR-001**: Hệ thống PHẢI có thư viện nghệ sĩ đã mất, mỗi nghệ sĩ gồm ngày sinh, ngày mất, quê quán, thể loại, thời kỳ, 3 bài hát kèm năm và link nghe, 3–4 dữ kiện có thật.
@@ -186,6 +205,9 @@ Người vận hành muốn viết về một người không có trong thư vi�
 - **FR-028**: Mỗi reel PHẢI có brief làm lại: mẫu hook theo format, timeline từng nhịp, nhịp độ, lý do reel ăn view, quy tắc làm lại.
 - **FR-029**: PHẢI làm lại reel bằng một nút: tạo dự án mới qua đúng pipeline (bài 700–900 từ, ảnh có license, text & voice), gắn brief vào dự án và vào `article.md`/`bundle.zip`, đánh dấu reel đang làm lại. Bản làm lại PHẢI dùng chữ do studio sinh và ảnh có license — KHÔNG dùng video/audio/ảnh/chữ của đối thủ.
 - **FR-030**: PHẢI tạo được bài viết từ tên nhân vật bất kỳ (`POST /api/projects/custom`), có trường tuỳ chọn (nghệ danh, thể loại, giai đoạn, quê quán, năm sinh/mất, giọng, link nguồn, bài hát, ghi chú); profile lưu lại để tái dùng, không tạo trùng, xoá được khi chưa có dự án; link nhạc cho profile tự tạo PHẢI là link tìm kiếm.
+- **FR-031**: Hệ thống PHẢI nhập được reel từ **link page đối thủ**: `POST /api/rivals/from-page` nhận `posts` (JSON do script trong trình duyệt người dùng trích), `html` (trang đã lưu) hoặc `items`; mỗi reel lưu `source_page`; PHẢI bỏ bài trùng theo link/hook và trả về số bài thêm/bỏ qua/loại.
+- **FR-032**: Khi nhập từ page, PHẢI có chế độ **chỉ giữ bài đã nổi** (≥ 60 điểm; nếu cả page chưa đạt 60 thì giữ top 40% của page đó), và danh sách PHẢI lọc được theo `source_page` + `only_viral`.
+- **FR-033**: Studio PHẢI cung cấp sẵn mã đọc trang (`/assets/fb-extract.js`) để người dùng chạy trong Console của chính trang Facebook họ đang mở; mã chỉ đọc DOM, gửi kết quả về studio của người dùng và có đường dự phòng copy JSON khi trình duyệt chặn. Máy chủ KHÔNG được scrape Facebook/Instagram/TikTok.
 - **FR-020**: Sau khi lấy ảnh, người dùng PHẢI tải được ảnh về máy: từng ảnh qua nút “Tải về”, cả bộ qua `images.zip` (JPEG + `ATTRIBUTION.txt`).
 
 ### Key Entities
@@ -198,7 +220,7 @@ Người vận hành muốn viết về một người không có trong thư vi�
 - **Voice**: voiceover — file, engine (edge-tts/pyttsx3/…), giọng, định dạng, dung lượng, thời lượng, text nguồn.
 - **Custom Event**: sự kiện người dùng thêm — nghệ sĩ, ngày, tiêu đề, ghi chú.
 - **Custom Artist**: profile tạo từ tên — tên, nghệ danh, thể loại, giai đoạn, quê quán, năm sinh/mất, giọng, link nguồn, bài hát, ghi chú.
-- **Rival Reel**: reel đối thủ — url, nền tảng, format, views/likes/comments/shares, nghệ sĩ, hook, ngày đăng, điểm + tier, trạng thái (mới/đang làm/đã làm), `remade_project_id`, ghi chú.
+- **Rival Reel**: reel đối thủ — url, nền tảng, format, views/likes/comments/shares, nghệ sĩ, hook, ngày đăng, **page nguồn**, điểm + tier, trạng thái (mới/đang làm/đã làm), `remade_project_id`, ghi chú.
 
 ## Success Criteria *(mandatory)*
 
@@ -209,6 +231,7 @@ Người vận hành muốn viết về một người không có trong thư vi�
 - **SC-005**: 100% ảnh lưu vào dự án có trường giấy phép (kể cả giá trị "không rõ") và nguồn; file `.zip` luôn kèm `ATTRIBUTION.txt`.
 - **SC-006**: Voice tạo được bằng ít nhất một engine khi máy có mạng **hoặc** pyttsx3; khi không có engine, lỗi trả về đọc được bằng tiếng Việt.
 - **SC-007**: Sidebar mở đúng 4 màn hình; bấm lại mục đang mở vẫn render (kiểm tra bằng jsdom).
+- **SC-011**: Với một page có ít nhất một bài đạt 60 điểm, nhập từ link page chỉ thêm đúng những bài đạt ngưỡng; nhập lại lần hai không tạo bản trùng.
 - **SC-009**: 100% reel nhập vào có điểm 0–100 và brief đủ 5 nhịp; mọi bản làm lại nằm trong 700–900 từ và mở được từ Studio về reel gốc.
 - **SC-010**: Tạo bài từ tên nhân vật chỉ cần 1 ô nhập + 1 cú bấm; 100% bài sinh ra (kể cả chỉ có tên) nằm trong 700–900 từ và không chứa số liệu bịa.
 - **SC-008**: Người vận hành có thể chỉnh sửa và lưu lại bài báo/text mà không mất dữ liệu khi chuyển tab hoặc tải lại trang.
@@ -219,5 +242,6 @@ Người vận hành muốn viết về một người không có trong thư vi�
 - Người dùng tự chịu trách nhiệm về quyền sử dụng ảnh và bản nhạc.
 - Studio không dựng video và chưa tích hợp đăng bài qua Facebook Graph API.
 - Thư viện nghệ sĩ là dữ liệu tuyển chọn (27 nghệ sĩ), mở rộng bằng cách sửa `seed_artists.py` hoặc tạo profile bằng tên.
-- Số liệu reel đối thủ do người dùng tự nhập (xem trên app) — studio không cào dữ liệu nền tảng.
+- Số liệu reel đối thủ đến từ trình duyệt của người dùng (script đọc trang họ đang mở) hoặc do họ nhập — studio không cào dữ liệu nền tảng, không giữ token Facebook.
+- Số liệu đọc từ DOM là con số hiển thị (đã làm tròn kiểu `1.2K`); người dùng sửa lại được từng reel.
 - edge-tts cần internet; pyttsx3 cần giọng hệ thống (SAPI5/say/espeak).

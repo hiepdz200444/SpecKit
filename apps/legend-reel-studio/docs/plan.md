@@ -103,7 +103,7 @@ apps/legend-reel-studio/
 
 `custom_artists` (profile tạo bằng tên): id, name, data_json (aka, genre, era, hometown, birth, death, gender, source_url, songs, facts), created_at, updated_at. `library.get_artist` không thấy id thì `resolve_artist()` rơi xuống bảng này, nên mọi endpoint dự án dùng chung một đường.
 
-`rival_reels` (reel đối thủ): id, url, platform, fmt, artist_name, hook, views, likes, comments, shares, posted_at, score, tier, status (moi/dang-lam/da-lam), remade_project_id, note, created_at, updated_at. Điểm không lưu cứng khi đọc — `with_score()` tính lại theo ngày hôm nay để độ mới luôn đúng.
+`rival_reels` (reel đối thủ): id, url, platform, fmt, artist_name, hook, views, likes, comments, shares, posted_at, **source_page**, score, tier, status (moi/dang-lam/da-lam), remade_project_id, note, created_at, updated_at. Điểm không lưu cứng khi đọc — `with_score()` tính lại theo ngày hôm nay để độ mới luôn đúng.
 
 **Migration**: `init_db()` tạo bảng nếu thiếu, `ALTER TABLE` thêm `images_json`, `script_json`, `voice_json` cho DB cũ, và đổi `status='video'` → `'script'`. Cột cũ (`render_path`, `audio_path`, `video_plan_json`…) bị bỏ qua khi đọc.
 
@@ -139,6 +139,8 @@ GET    /api/rivals?q=&platform=&fmt=&status=&sort=&min_score=&only_unused=
 POST   /api/rivals                          {lines?} | {items?} | {url, ...} → {reels, added, errors}
 PATCH/DELETE /api/rivals/{id}
 POST   /api/rivals/{id}/remake              {artist_id?|artist_name?, event?, seed?, generate?} → {project, reel}
+POST   /api/rivals/from-page                {page_url, posts?|html?|items?, only_viral?, min_score?} → {reels, added, skipped, filtered_out}
+GET    /api/rivals/pages                    → [{page, count}]
 GET    /api/voices
 POST   /api/projects/{id}/voice             {text, voice}
 DELETE /api/projects/{id}/voice
@@ -188,6 +190,21 @@ POST /api/rivals/{id}/remake → artist (library | custom | mới từ tên | kh
 ```
 
 Điểm = độ phủ (log10 views, ≤50) + tương tác (ER%, ≤40) + độ mới (≤10). Brief chỉ mô tả **cấu trúc**; bản làm lại sinh chữ mới và dùng ảnh Wikipedia/Commons nên không tái sử dụng tài sản của đối thủ.
+
+## Page import pipeline
+
+```text
+web/assets/fb-extract.js  (chạy trong Console của trang Facebook người dùng mở)
+  → đọc div[role="article"], lấy hook/url/thời gian + số trong aria-label & text
+  → POST /api/rivals/from-page {page_url, posts}   (dự phòng: copy JSON, dán tay)
+    hoặc dán HTML đã lưu (Ctrl+S) → posts_from_html()
+
+rivals.from_posts()  → count_from_text (1.2K / 1,2 N / 1.234 / 2,4 Tr), guess_format, hook_from_text
+app.import_from_page → chuẩn hoá, bỏ trùng (url hoặc hook+page), chọn bài "đã nổi"
+                     → db.create_rival(source_page=…)
+```
+
+Máy chủ không gọi Facebook: mọi bytes đến từ trình duyệt của người dùng hoặc do họ dán. Chọn "đã nổi": giữ bài ≥ 60 điểm; nếu cả batch dưới 60 thì giữ top 40% (luôn ≥ 1 bài) để page nhỏ vẫn dùng được.
 
 ## Name-based profile pipeline
 

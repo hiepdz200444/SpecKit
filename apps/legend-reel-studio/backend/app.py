@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import json
+import math
 import os
 import re
 import shutil
@@ -37,7 +38,7 @@ IMAGE_ID_RE = re.compile(r"^[a-f0-9]{8,32}$")
 for d in (DATA_DIR, IMAGE_DIR, VOICE_DIR):
     os.makedirs(d, exist_ok=True)
 
-APP_VERSION = "2.2.0"
+APP_VERSION = "2.3.0"
 _COMMIT_CACHE: dict[str, str] = {}
 
 
@@ -76,6 +77,8 @@ def version_info() -> dict:
             "no-video-render",
             "rivals-ranking",
             "rivals-remake",
+            "rivals-page-import",
+            "facebook-page-extractor",
             "article-by-name",
         ],
     }
@@ -707,6 +710,8 @@ def list_rivals(
     sort: str = Query(default="score"),
     min_score: int = Query(default=0, ge=0, le=100),
     only_unused: bool = Query(default=False),
+    page: str = Query(default=""),
+    only_viral: bool = Query(default=False),
 ):
     items = [rivals_mod.with_score(r) for r in db.list_rivals()]
     needle = q.strip().lower()
@@ -725,7 +730,11 @@ def list_rivals(
         items = [r for r in items if r.get("status") == status]
     if only_unused:
         items = [r for r in items if not r.get("remade_project_id")]
-    items = [r for r in items if r["score"] >= min_score]
+    if page:
+        needle_page = page.lower().strip()
+        items = [r for r in items if needle_page in str(r.get("source_page") or "").lower()]
+    floor = max(min_score, 65 if only_viral else 0)
+    items = [r for r in items if r["score"] >= floor]
 
     keys = {
         "score": lambda r: (r["score"], r.get("views") or 0),
@@ -734,9 +743,15 @@ def list_rivals(
         "recent": lambda r: r.get("created_at") or "",
     }
     items.sort(key=keys.get(sort, keys["score"]), reverse=True)
+    page_counts: dict[str, int] = {}
+    for reel in db.list_rivals():
+        label = str(reel.get("source_page") or "").strip()
+        if label:
+            page_counts[label] = page_counts.get(label, 0) + 1
     return {
         "reels": items,
         "count": len(items),
+        "pages": [{"page": k, "count": v} for k, v in sorted(page_counts.items())],
         "platforms": rivals_mod.PLATFORMS,
         "formats": rivals_mod.FORMATS,
         "format_labels": rivals_mod.FORMAT_LABEL,
@@ -759,30 +774,137 @@ def add_rivals(payload: dict = Body(...)):
 
     created, errors = [], []
     for item in items:
-        platform = (item.get("platform") or rivals_mod.platform_from_url(item.get("url", ""))).lower()
-        if platform not in rivals_mod.PLATFORMS:
-            platform = "facebook"
-        fmt = (item.get("format") or "story").lower()
-        if fmt not in rivals_mod.FORMATS:
-            fmt = "story"
-        record = {
-            "platform": platform,
-            "url": item.get("url", ""),
-            "artist_name": item.get("artist_name", ""),
-            "hook": item.get("hook", ""),
-            "views": rivals_mod.parse_number(item.get("views")),
-            "likes": rivals_mod.parse_number(item.get("likes")),
-            "comments": rivals_mod.parse_number(item.get("comments")),
-            "shares": rivals_mod.parse_number(item.get("shares")),
-            "format": fmt,
-            "notes": item.get("notes", ""),
-            "posted_at": item.get("posted_at", ""),
-        }
+        record = _reel_record(item)
         if not record["url"] and not record["hook"] and not record["artist_name"]:
             errors.append("Bỏ qua một dòng vì thiếu cả link, hook và tên nghệ sĩ")
             continue
         created.append(rivals_mod.with_score(db.create_rival(record)))
     return {"reels": created, "added": len(created), "errors": errors}
+
+
+def _reel_record(item: dict, source_page: str = "") -> dict:
+    platform = (item.get("platform") or rivals_mod.platform_from_url(item.get("url", ""))).lower()
+    if platform not in rivals_mod.PLATFORMS:
+        platform = "facebook"
+    fmt = (item.get("format") or "story").lower()
+    if fmt not in rivals_mod.FORMATS:
+        fmt = "story"
+    return {
+        "platform": platform,
+        "url": str(item.get("url") or "").strip(),
+        "artist_name": str(item.get("artist_name") or "").strip(),
+        "hook": str(item.get("hook") or "").strip(),
+        "views": rivals_mod.count_from_text(item.get("views")),
+        "likes": rivals_mod.count_from_text(item.get("likes")),
+        "comments": rivals_mod.count_from_text(item.get("comments")),
+        "shares": rivals_mod.count_from_text(item.get("shares")),
+        "format": fmt,
+        "notes": str(item.get("notes") or "").strip(),
+        "posted_at": str(item.get("posted_at") or "").strip(),
+        "source_page": source_page or str(item.get("source_page") or "").strip(),
+    }
+
+
+@app.post("/api/rivals/from-page")
+def import_from_page(payload: dict = Body(...)):
+    """Ba đường nhập từ một page đối thủ — tất cả đều do trình duyệt của bạn đọc.
+
+    1. `posts`: JSON do `web/assets/fb-extract.js` trích từ trang (khuyến nghị).
+    2. `html`:  HTML bạn lưu từ trang (Ctrl+S) — studio tự bóc khối `role="article"`.
+    3. `page_url` + `items`: danh sách bạn tự gõ nhưng muốn gắn chung một page.
+
+    Máy chủ KHÔNG tự gọi Facebook: không login, không scrape, không vi phạm điều khoản.
+    """
+    page_url = rivals_mod.normalize_page_url(payload.get("page_url") or "")
+    label = rivals_mod.page_label(page_url) if page_url else ""
+
+    items: list[dict] = []
+    if isinstance(payload.get("posts"), list):
+        items += rivals_mod.from_posts(payload["posts"], page_url)
+    if payload.get("html"):
+        items += rivals_mod.posts_from_html(payload["html"], page_url)
+    if isinstance(payload.get("items"), list):
+        items += [_reel_record(i, label) for i in payload["items"] if isinstance(i, dict)]
+    if not items:
+        raise HTTPException(
+            400,
+            "Không đọc được bài nào. Hãy cuộn page để tải thêm bài, chạy lại mã lấy bài và dán kết quả vào đây.",
+        )
+
+    existing = db.list_rivals()
+    seen_urls = {str(r.get("url") or "").lower() for r in existing if r.get("url")}
+    seen_hooks = {
+        (str(r.get("hook") or "").lower(), str(r.get("source_page") or ""))
+        for r in existing
+        if r.get("hook") and r.get("platform") == "facebook"
+    }
+    min_score = int(payload.get("min_score") or 0)
+    only_viral = bool(payload.get("only_viral"))
+
+    skipped, low = 0, 0
+    candidates: list[dict] = []
+    batch_urls: set[str] = set()
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        record = _reel_record(item, label)
+        if not record["url"] and not record["hook"]:
+            skipped += 1
+            continue
+        url_key = record["url"].lower()
+        hook_key = (record["hook"].lower(), record["source_page"])
+        if (url_key and url_key in seen_urls) or (record["hook"] and hook_key in seen_hooks) or (url_key and url_key in batch_urls):
+            skipped += 1
+            continue
+        if url_key:
+            batch_urls.add(url_key)
+        candidates.append(rivals_mod.with_score({**record, "id": ""}))
+
+    # "đã nổi" = điểm ≥ 60. Page nhỏ chưa bài nào đạt 60 thì giữ nhóm nổi nhất
+    # của chính page đó (top 40%) để bạn vẫn có cái để làm lại, không bị rỗng.
+    keep = set(range(len(candidates)))
+    if only_viral and candidates:
+        best = max(c["score"] for c in candidates)
+        if best >= 60:
+            keep = {i for i, c in enumerate(candidates) if c["score"] >= 60}
+        else:
+            ranked = sorted(range(len(candidates)), key=lambda i: candidates[i]["score"], reverse=True)
+            keep = set(ranked[: max(1, math.ceil(len(candidates) * 0.4))])
+
+    created = []
+    for index, candidate in enumerate(candidates):
+        score = candidate["score"]
+        if only_viral and index not in keep:
+            low += 1
+            continue
+        if min_score and score < min_score:
+            low += 1
+            continue
+        record = {k: v for k, v in candidate.items() if k not in rivals_mod.SCORE_FIELDS}
+        created.append(rivals_mod.with_score(db.create_rival(record)))
+
+    created.sort(key=lambda r: r["score"], reverse=True)
+    return {
+        "reels": created,
+        "added": len(created),
+        "skipped": skipped,
+        "filtered_out": low,
+        "page_url": page_url,
+        "page_label": label,
+        "errors": [],
+    }
+
+
+@app.get("/api/rivals/pages")
+def rival_pages():
+    """Which competitor pages already have reels saved (for the filter dropdown)."""
+    counts: dict[str, int] = {}
+    for reel in db.list_rivals():
+        page = str(reel.get("source_page") or "").strip()
+        if page:
+            counts[page] = counts.get(page, 0) + 1
+    pages = [{"page": page, "count": count} for page, count in sorted(counts.items())]
+    return {"pages": pages}
 
 
 @app.patch("/api/rivals/{rid}")

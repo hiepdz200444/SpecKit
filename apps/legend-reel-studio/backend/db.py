@@ -72,6 +72,7 @@ CREATE TABLE IF NOT EXISTS rival_reels (
     format TEXT NOT NULL DEFAULT 'story',
     notes TEXT DEFAULT '',
     posted_at TEXT DEFAULT '',
+    source_page TEXT DEFAULT '',
     status TEXT NOT NULL DEFAULT 'new',
     remade_project_id TEXT DEFAULT '',
     created_at TEXT NOT NULL
@@ -150,6 +151,10 @@ def init_db() -> None:
         for name, ddl in ADDED_COLUMNS.items():
             if name not in cols:
                 conn.execute(f"ALTER TABLE projects ADD COLUMN {name} {ddl}")
+        # competitor-page import: old databases need source_page on rival_reels
+        rival_cols = {row["name"] for row in conn.execute("PRAGMA table_info(rival_reels)")}
+        if "source_page" not in rival_cols:
+            conn.execute("ALTER TABLE rival_reels ADD COLUMN source_page TEXT DEFAULT ''")
         # the old "video" status is now "script" (video rendering was removed)
         conn.execute("UPDATE projects SET status = 'script' WHERE status = 'video'")
 
@@ -388,7 +393,7 @@ def count_projects_for_artist(aid: str) -> int:
 # --------------------------------------------------------------------------- #
 RIVAL_FIELDS = (
     "platform", "url", "artist_name", "hook", "views", "likes", "comments", "shares",
-    "format", "notes", "posted_at", "status", "remade_project_id",
+    "format", "notes", "posted_at", "source_page", "status", "remade_project_id",
 )
 
 

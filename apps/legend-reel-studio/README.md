@@ -14,6 +14,7 @@ Hai đường vào mới: **xem reel của đối thủ đã nổi** rồi **là
 
 | Bước | Bạn làm gì | Studio làm gì |
 | --- | --- | --- |
+| **0. Nghiên cứu** | Dán link page Facebook đối thủ | Trình duyệt của bạn đọc page, studio chấm điểm và chỉ giữ những bài đã nổi, kèm brief cấu trúc để làm lại |
 | **1. Khám phá** | Chọn ngày + khoảng ± ngày, lọc theo loại sự kiện, tìm theo nghệ sĩ/bài hát/thể loại | Quét thư viện 27 huyền thoại, trả về sự kiện đúng ngày kèm 3 bài nhạc và link nghe thử |
 | **2. Bài báo** | Sửa tiêu đề và nội dung, chọn biến thể tiêu đề, copy từng khối | Sinh bài báo tiếng Anh **700–900 từ** (đếm từ trực tiếp, cảnh báo khi ra ngoài khoảng), 3 biến thể tiêu đề, 3 link nhạc; mỗi khối có nút Copy |
 | **3. Ảnh nghệ sĩ** | Bấm lấy ảnh tự động, dán link ảnh nguồn khác, chọn ảnh banner, tải về hoặc tải cả bộ `.zip` | Lấy ảnh từ **Wikipedia + Wikimedia Commons** kèm **giấy phép + tác giả + link trang gốc**; tải link ảnh bạn dán (Pinterest/Getty — **không scrape**), upload ảnh; mục tiêu **1 banner + 20 ảnh** |
@@ -145,12 +146,12 @@ apps/legend-reel-studio/
 │   ├── seed_artists.py   # 27 huyền thoại + 15 cột mốc phát hành
 │   ├── content.py        # bài báo 700–900 từ, chữ 9–15 từ, hook, caption, checks
 │   ├── profiles.py       # profile sinh từ đúng cái tên (bài 700–900 từ, link nhạc dạng tìm kiếm)
-│   ├── rivals.py         # chấm điểm reel đối thủ, brief làm lại, đọc dòng nhập tay
+│   ├── rivals.py         # chấm điểm reel đối thủ, brief làm lại, đọc dòng nhập tay, bóc HTML/JSON từ page
 │   ├── images.py         # Wikipedia + Wikimedia Commons (license), tải link, lưu JPEG
 │   └── voice.py          # edge-tts (en-US neural) → fallback pyttsx3
 ├── web/                  # SPA thuần JS + CSS, font OFL
 │   ├── index.html · styles.css · app.js
-│   └── assets/           # font, ảnh nền sân khấu/vinyl/khán giả
+│   └── assets/           # font, ảnh nền sân khấu/vinyl/khán giả, fb-extract.js (mã lấy bài từ page)
 ├── docs/                 # spec.md, plan.md, tasks.md (Spec-Driven Development)
 ├── tests/                # pytest (sự kiện, nội dung, API, ảnh, voice) + ui_smoke.mjs
 ├── package.json          # chỉ để chạy test UI bằng jsdom
@@ -161,9 +162,13 @@ apps/legend-reel-studio/
 
 Mục **Reels đối thủ** (sidebar) để bạn ghi lại những reel cùng ngách đang ăn view, rồi rút cấu trúc của chúng cho bài của mình.
 
-- **Nhập tay, dán link**: mỗi dòng `url | nền tảng | views | likes | comments | shares | nghệ sĩ | hook | format`. Số viết kiểu `1.2M`, `84k`, `2.1 nghìn`, `1.5 triệu` hay `1,234` đều hiểu đúng. Nền tảng để trống thì studio đoán từ link. Studio **không scrape** Facebook/Instagram/TikTok — bạn tự xem reel rồi dán số liệu.
+- **Đưa link page Facebook, studio lọc bài đã nổi**: dán `facebook.com/<ten-page>` vào ô “Từ link page Facebook”, bấm **Copy mã lấy bài**, rồi mở page đó và chạy mã trong Console của trình duyệt (F12 → Console → dán → Enter). Mã đọc chính trang bạn đang xem, gom mọi bài đã tải (hook, thời gian, reactions/comment/share/views), gửi về studio — bài nào đạt ngưỡng nổi bật mới được nhập, phần còn lại bị loại. Nếu trình duyệt chặn gửi thẳng (trang https gọi về `http://127.0.0.1`), mã tự copy JSON để bạn dán vào ô trong studio.
+  - Vì sao phải qua trình duyệt: Facebook chặn máy chủ đọc page khi chưa đăng nhập, và không có API công khai cho page của người khác. Studio **không scrape**, không dùng token, không gửi dữ liệu cho bên thứ ba — mọi thứ chạy trên máy bạn.
+  - Có thể dán thẳng **HTML lưu từ trang** (`Ctrl+S`) vào `POST /api/rivals/from-page` với trường `html`; studio bóc các khối `role="article"`.
+- **Nhập tay**: mỗi dòng `url | nền tảng | views | likes | comments | shares | nghệ sĩ | hook | format`. Số viết kiểu `1.2M`, `84k`, `2.1 nghìn`, `1.5 triệu` hay `1,234` đều hiểu đúng. Nền tảng để trống thì studio đoán từ link.
 - **Chấm “đã nổi”**: điểm 0–100 = độ phủ (≤50) + tỉ lệ tương tác (≤40) + độ mới (≤10), kèm nhãn `Đột phá / Nổi / Khá / Mới`. Reel ít view nhưng tương tác cao vẫn có thể vượt reel triệu view — đúng ý “đã nổi”, không chỉ “nhiều view”.
-- **Lọc & xếp hạng**: tìm theo hook/nghệ sĩ, lọc theo nền tảng, format, trạng thái, `điểm tối thiểu`, `chưa làm lại`, xếp theo điểm / view / tương tác / mới nhất.
+- **Lọc & xếp hạng**: tìm theo hook/nghệ sĩ, lọc theo **page đối thủ**, nền tảng, format, trạng thái, `chỉ bài đã nổi`, `điểm tối thiểu`, `chưa làm lại`, xếp theo điểm / view / tương tác / mới nhất.
+- **“Chỉ bài đã nổi” khi nhập**: giữ bài **≥ 60 điểm**; nếu cả page chưa bài nào đạt 60 (page nhỏ) thì giữ nhóm nổi nhất của chính page đó (top 40%) để bạn không bị danh sách rỗng. Bài trùng link/hook được tự bỏ qua.
 - **Brief làm lại** (mở ngay trên card): mẫu hook của format, 5 nhịp thời lượng, nhịp độ, lý do reel ăn view, và **quy tắc làm lại**.
 - **Một nút “Làm lại”**: chọn nghệ sĩ trong thư viện, hoặc gõ tên mới, hoặc để trống — studio tạo dự án mới bằng đúng pipeline cũ (bài 700–900 từ, ảnh có license, text & voice) và gắn brief vào dự án (hiện ở đầu trang Studio, có trong `article.md` và `bundle.zip`).
 
@@ -220,7 +225,9 @@ API lưu voice vào `data/voice/<project>/`, trả URL để **nghe thử trong 
 | GET | `/api/events?day=&window=&q=&kinds=` | Tìm sự kiện theo ngày/khoảng/từ khoá/loại |
 | GET | `/api/artists`, `/api/artists/{id}` | Danh sách/chi tiết nghệ sĩ |
 | POST | `/api/events/custom` | Thêm sự kiện riêng |
-| GET/POST | `/api/rivals` | Danh sách/nhập reel đối thủ (`lines` hoặc `items`), lọc + xếp theo điểm đã nổi |
+| GET/POST | `/api/rivals` | Danh sách/nhập reel đối thủ (`lines` hoặc `items`), lọc (`page`, `only_viral`, …) + xếp theo điểm đã nổi |
+| POST | `/api/rivals/from-page` | Nhập từ page đối thủ: `{page_url, posts?, html?, only_viral?}` — JSON do `web/assets/fb-extract.js` trích trong trình duyệt, hoặc HTML lưu từ trang |
+| GET | `/api/rivals/pages` | Các page đã có reel trong studio (cho bộ lọc) |
 | PATCH/DELETE | `/api/rivals/{id}` | Sửa/xoá reel (ghi chú, trạng thái `moi\|dang-lam\|da-lam`) |
 | POST | `/api/rivals/{id}/remake` | Làm lại reel: tạo dự án mới cùng pipeline, gắn brief + link reel gốc |
 | GET/POST | `/api/artists/custom` | Profile tạo bằng tên; `PATCH/DELETE /api/artists/custom/{id}` |
@@ -259,10 +266,11 @@ cd apps/legend-reel-studio
 . .venv/bin/activate
 pytest -q                              # API, nội dung, ảnh (mock mạng), voice (mock engine)
 npm install                            # chỉ cần cho test UI (jsdom)
-node tests/ui_smoke.mjs               # jsdom: sidebar 5 mục, 3 tab, copy, banner, voice, reels đối thủ, bài theo tên
+node tests/ui_smoke.mjs               # jsdom: sidebar 5 mục, 3 tab, copy, banner, voice, reels đối thủ, nhập từ page, bài theo tên
+node tests/fb_extract.mjs             # jsdom: mã lấy bài đọc đúng DOM kiểu Facebook
 ```
 
-`pytest` bao gồm: tính sự kiện theo ngày (kể cả 29/02), tìm kiếm, ràng buộc 9–15 từ, **bài báo luôn 700–900 từ cho cả 27 nghệ sĩ**, import ảnh từ Wikipedia/Commons với license, chặn link Pinterest/`localhost`/HTML, zip + `ATTRIBUTION.txt`, voice với cả ba nhánh (edge-tts, pyttsx3, không có engine), **profile tạo bằng tên** (700–900 từ, không in “0 years”, link nhạc dạng tìm kiếm) và **reel đối thủ** (đọc số `1.2M/84k/1,5 triệu`, chấm điểm, lọc, làm lại, brief nằm trong `.md`/`bundle.zip`).
+`pytest` bao gồm: tính sự kiện theo ngày (kể cả 29/02), tìm kiếm, ràng buộc 9–15 từ, **bài báo luôn 700–900 từ cho cả 27 nghệ sĩ**, import ảnh từ Wikipedia/Commons với license, chặn link Pinterest/`localhost`/HTML, zip + `ATTRIBUTION.txt`, voice với cả ba nhánh (edge-tts, pyttsx3, không có engine), **profile tạo bằng tên** (700–900 từ, không in “0 years”, link nhạc dạng tìm kiếm), **reel đối thủ** (đọc số `1.2M/84k/1,5 triệu`, chấm điểm, lọc, làm lại, brief nằm trong `.md`/`bundle.zip`) và **nhập từ page** (chuẩn hoá `1,2 N` / `1.234`, bóc khối `role="article"` từ HTML, lọc bài đã nổi, bỏ trùng, lọc theo page).
 
 ## 13. Giới hạn đã biết
 

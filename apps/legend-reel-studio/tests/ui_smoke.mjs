@@ -252,7 +252,57 @@ async function main() {
     $("#rplatform").dispatchEvent(new window.Event("change", { bubbles: true }));
     await waitFor(() => $$(".rival-card").length >= 2, "filter reset", 15000);
 
-    click("[data-remake]");
+    console.log("• Nhập từ link page Facebook");
+    click("#btn-rimport");
+    await waitFor(() => $("#rpage-json"), "page import panel");
+    ok(!!$("#rpage-url") && !!$("#rpage-copy"), "có ô link page + nút copy mã lấy bài");
+    $("#rpage-url").value = "https://www.facebook.com/OldSchoolMusicPage";
+    $("#rpage-url").dispatchEvent(new window.Event("input", { bubbles: true }));
+    await waitFor(() => !$("#rpage-open").hidden, "open-page link appears");
+    ok($("#rpage-open").href.includes("facebook.com/OldSchoolMusicPage"), "mở được page đối thủ ở tab mới");
+    click("#rpage-copy");
+    await waitFor(() => /document.querySelectorAll/.test(clipboard.text), "extractor code copied", 15000);
+    ok(clipboard.text.includes('role="article"'), "mã lấy bài đọc khối role=article của trang");
+
+    $("#rpage-json").value = JSON.stringify({
+      page_url: "https://www.facebook.com/OldSchoolMusicPage",
+      posts: [
+        {
+          url: "https://www.facebook.com/OldSchoolMusicPage/posts/900",
+          text: "POV: you heard this voice in 1975 and never forgot it. Still the best to ever do it.",
+          likes: "84K",
+          comments: "3.2K",
+          shares: "1.1K",
+          views: "2.4M",
+        },
+        {
+          url: "https://www.facebook.com/OldSchoolMusicPage/posts/901",
+          text: "A quiet Tuesday rehearsal note that nobody ever shared at all.",
+          likes: "4",
+          comments: "0",
+          views: "90",
+        },
+      ],
+    });
+    ok($("#rpage-only-viral").checked, "mặc định chỉ giữ bài đã nổi");
+    click("#rpage-import");
+    await waitFor(() => $$(".rival-card").length >= 3, "page import adds viral post", 20000);
+    ok($$(".rival-card").length >= 3, "page import thêm bài đã nổi vào danh sách");
+    ok($$(".rival-card .tag-accent").length >= 1, "card ghi nguồn page đối thủ");
+    await waitFor(() => $$("#rpage-filter option").length >= 2, "page filter option", 15000);
+    ok($$("#rpage-filter option").length >= 2, "có bộ lọc theo page đối thủ");
+    ok(!!$("#rviral"), "có chip “chỉ bài đã nổi”");
+    $("#rpage-filter").value = "facebook.com/OldSchoolMusicPage";
+    $("#rpage-filter").dispatchEvent(new window.Event("change", { bubbles: true }));
+    await waitFor(() => $$(".rival-card").length === 1, "page filter narrows list", 15000);
+    ok($$(".rival-card").length === 1, "lọc theo page vừa nhập");
+    $("#rpage-filter").value = "";
+    $("#rpage-filter").dispatchEvent(new window.Event("change", { bubbles: true }));
+    await waitFor(() => $$(".rival-card").length >= 3, "page filter reset", 15000);
+
+    const remakeCard = $$(".rival-card").find((c) => /Whitney/.test(c.textContent));
+    ok(!!remakeCard, "tìm được card Whitney để làm lại");
+    click(remakeCard.querySelector("[data-remake]"));
     await waitFor(() => $("#rm-artist"), "remake modal");
     ok(/Làm lại reel này/.test($(".modal").textContent), "mở hộp thoại làm lại");
     $("#rm-kind").value = "";

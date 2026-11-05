@@ -1,9 +1,10 @@
 """Competitor reel tracking: import, score, filter and turn into a remake brief.
 
-The studio never scrapes Facebook / Instagram / TikTok. The operator pastes the
-numbers they can see (views, likes, comments, shares) and the studio ranks the
-reels, explains why each one worked, and turns the winner into a remake brief
-that feeds a new project.
+The studio never scrapes Facebook / Instagram / TikTok on its own. The operator
+either pastes a competitor page URL (and runs the studio's small extractor in
+their own logged-in browser, which reads the page they already have open) or
+pastes the numbers by hand. Either way the data lands here, where it is scored,
+ranked, explained, and turned into a remake brief that feeds a new project.
 """
 
 from __future__ import annotations
@@ -12,6 +13,7 @@ import math
 import re
 from datetime import date
 from typing import Any
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 PLATFORMS = ["facebook", "instagram", "tiktok", "youtube"]
 PLATFORM_LABEL = {
@@ -205,6 +207,12 @@ def score_reel(reel: dict) -> dict:
     }
 
 
+SCORE_FIELDS = (
+    "score", "tier", "engagement", "reach_points", "engagement_points",
+    "recency_points", "age_days", "verdict", "platform_label", "format_label", "brief",
+)
+
+
 def with_score(reel: dict) -> dict:
     out = dict(reel)
     out.update(score_reel(reel))
@@ -302,3 +310,233 @@ def parse_bulk(text: str) -> list[dict]:
         if item:
             out.append(item)
     return out
+
+
+# --------------------------------------------------------------------------- #
+# "dán link page Facebook" → lọc bài đã nổi                                    #
+# --------------------------------------------------------------------------- #
+# Facebook không cho máy chủ đọc page khi chưa đăng nhập, nên đường đi thật là:
+# trình duyệt của bạn (đang đăng nhập) đọc DOM trang, trích bài, rồi gửi JSON về
+# studio. Phần dưới chuẩn hoá JSON đó (và cả HTML người dùng lưu về) thành reel.
+_COUNT_RE = re.compile(
+    r"(\d[\d.,\s]*)\s*(k|m|b|n|tr|triệu|nghìn)?\b",
+    re.IGNORECASE,
+)
+
+_VIEW_WORDS = r"(?:views?|lượt xem|xem|plays?|lượt phát)"
+_LIKE_WORDS = r"(?:reactions?|likes?|cảm xúc|thích|lượt thích)"
+_COMMENT_WORDS = r"(?:comments?|bình luận|lượt bình luận)"
+_SHARE_WORDS = r"(?:shares?|chia sẻ|lượt chia sẻ|lượt chia sẽ)"
+
+
+def count_from_text(value: Any) -> int:
+    """Like parse_number but tolerant of Facebook's '1,2 N', '1.234', '12 345'."""
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return max(0, int(value))
+    text = str(value or "").strip().lower()
+    if not text:
+        return 0
+    match = _COUNT_RE.search(text)
+    if not match:
+        return 0
+    raw = match.group(1).strip().replace(" ", "")
+    suffix = (match.group(2) or "").lower()
+    # "1.234" / "1,234" → thousands separator when the groups look like 3 digits
+    if not suffix and re.fullmatch(r"\d{1,3}([.,]\d{3})+", raw):
+        digits = re.sub(r"[^\d]", "", raw)
+        return int(digits)
+    if suffix:
+        number = raw.replace(",", ".")
+        try:
+            value_f = float(number)
+        except ValueError:
+            return 0
+        if suffix in ("k", "n", "nghìn"):
+            return int(round(value_f * 1_000))
+        if suffix == "tr" or suffix == "triệu":
+            return int(round(value_f * 1_000_000))
+        if suffix == "m":
+            return int(round(value_f * 1_000_000))
+        if suffix == "b":
+            return int(round(value_f * 1_000_000_000))
+    digits = re.sub(r"[^\d]", "", raw)
+    return int(digits) if digits else 0
+
+
+def _metric(text: str, words: str) -> int:
+    """Number that appears right before a metric word ('1.2K comments')."""
+    match = re.search(r"([\d][\d.,\s]*\s*(?:k|m|b|n|tr|triệu|nghìn)?)\s*" + words, text, re.IGNORECASE)
+    return count_from_text(match.group(1)) if match else 0
+
+
+def guess_format(text: str) -> str:
+    lowered = (text or "").lower()
+    if re.search(r"\bpov\b", lowered):
+        return "pov"
+    if re.search(r"(top\s*[3-9])|(\b[3-9]\s+(things|songs|facts|reasons))|danh sách", lowered):
+        return "list"
+    if re.search(r"countdown|đếm ngược|\b[0-9]\s*(\.|,)?\s*(days?|ngày)\s*(left|nữa)", lowered):
+        return "countdown"
+    if re.search(r"[\"“”«»].+[\"“”«»]", text or "") and len((text or "")) < 220:
+        return "quote"
+    if re.search(r"tribute|in memory|remembering|tưởng nhớ|tri ân", lowered):
+        return "tribute"
+    return "story"
+
+
+def hook_from_text(text: str, limit: int = 140) -> str:
+    clean = re.sub(r"\s+", " ", (text or "")).strip()
+    clean = re.sub(r"^(facebook|instagram|tiktok|youtube)\s*[:\-–]\s*", "", clean, flags=re.I)
+    if not clean:
+        return ""
+    sentence = re.split(r"(?<=[.!?…])\s", clean)[0]
+    hook = sentence if 8 <= len(sentence) <= limit else clean[:limit].rstrip()
+    return hook.strip()
+
+
+def normalize_page_url(url: str) -> str:
+    """`facebook.com/<page>/?ref=…` → `https://www.facebook.com/<page>` (or a profile id)."""
+    text = (url or "").strip()
+    if not text:
+        return ""
+    if not re.match(r"https?://", text, re.I):
+        text = "https://" + text.lstrip("/")
+    lowered = text.lower()
+    if "facebook.com" not in lowered:
+        return text.split("?")[0].rstrip("/")
+    path = re.sub(r"^https?://[^/]+", "", text, flags=re.I).split("?")[0].split("#")[0]
+    match = re.match(r"^/(?:pg/|pages/[^/]+/)?([A-Za-z0-9._\-]+)", path)
+    handle = match.group(1) if match else ""
+    if not handle:
+        return "https://www.facebook.com"
+    return f"https://www.facebook.com/{handle}"
+
+
+def page_label(page_url: str) -> str:
+    clean = normalize_page_url(page_url)
+    match = re.match(r"^https?://(?:www\.)?facebook\.com/([^/?#]+)", clean, re.I)
+    if match:
+        return f"facebook.com/{match.group(1)}"
+    return clean.replace("https://", "").replace("http://", "")
+
+
+_TRACKING_PARAMS = ("__cft__", "__tn__", "mibextid", "rdid", "share_url", "ref", "refsrc", "hc_ref")
+
+
+def clean_url(url: str) -> str:
+    """Bỏ tham số tracking của Facebook để hai lần nhập cùng bài không bị trùng đôi."""
+    text = (url or "").strip()
+    if not text:
+        return ""
+    if "facebook.com" not in text.lower() and "fb.watch" not in text.lower():
+        return text
+    parsed = urlsplit(text)
+    if not parsed.query:
+        return text
+    keep = [(k, v) for k, v in parse_qsl(parsed.query, keep_blank_values=True) if k not in _TRACKING_PARAMS]
+    query = urlencode(keep)
+    return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, query, ""))
+
+
+def _clean_post(post: dict) -> dict:
+    text = str(post.get("text") or post.get("message") or post.get("hook") or "")
+    text = re.sub(r"[ \t]+", " ", text.replace("\r", "\n")).strip()
+    hook = str(post.get("hook") or "").strip() or hook_from_text(text)
+    url = str(post.get("url") or post.get("permalink") or "").strip()
+    if url.startswith("/"):
+        url = "https://www.facebook.com" + url
+    url = clean_url(url)
+    posted_at = str(post.get("posted_at") or post.get("time") or "").strip()
+    artist = str(post.get("artist_name") or post.get("artist") or "").strip()
+    views = count_from_text(post.get("views") if post.get("views") else post.get("plays"))
+    likes = count_from_text(post.get("likes") or post.get("reactions"))
+    comments = count_from_text(post.get("comments"))
+    shares = count_from_text(post.get("shares"))
+    if not (views or likes or comments or shares) and text:
+        # the DOM often only gives us one blob of "1.2K reactions 84 comments"
+        likes = likes or _metric(text, _LIKE_WORDS)
+        comments = comments or _metric(text, _COMMENT_WORDS)
+        shares = shares or _metric(text, _SHARE_WORDS)
+        views = views or _metric(text, _VIEW_WORDS)
+    fmt = str(post.get("format") or "").strip().lower()
+    if fmt not in FORMATS:
+        fmt = guess_format(text)
+    return {
+        "platform": "facebook",
+        "url": url,
+        "artist_name": artist,
+        "hook": hook,
+        "views": views,
+        "likes": likes,
+        "comments": comments,
+        "shares": shares,
+        "format": fmt,
+        "posted_at": posted_at,
+        "notes": str(post.get("notes") or "").strip(),
+        "_text": text,
+    }
+
+
+def from_posts(posts: Any, page_url: str = "") -> list[dict]:
+    """Normalise the JSON produced by the browser extractor into a reel list."""
+    if not isinstance(posts, list):
+        return []
+    out: list[dict] = []
+    seen: set[str] = set()
+    for raw in posts:
+        if not isinstance(raw, dict):
+            continue
+        item = _clean_post(raw)
+        key = (item["url"] or item["hook"] or item["_text"][:80]).lower().strip()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        out.append(item)
+    return out
+
+
+def posts_from_html(html: str, page_url: str = "") -> list[dict]:
+    """Best effort extraction from a saved page ('Lưu trang thành HTML').
+
+    Facebook's DOM is obfuscated, so we only rely on `role="article"` blocks and
+    the visible metric text inside them.
+    """
+    text = html or ""
+    if not text.strip():
+        return []
+    blocks = re.split(r'role=["\']article["\']', text, flags=re.I)[1:]
+    posts: list[dict] = []
+    for block in blocks[:80]:
+        chunk = block[:20_000].lstrip("'\"> \n\r\t")
+        # aria-labels carry the counts ("1.2K reactions") when the visible node is bare
+        arias = " ".join(re.findall(r'aria-label=["\']([^"\']{2,120})["\']', chunk, flags=re.I))
+        plain = re.sub(r"<script.*?</script>", " ", chunk, flags=re.S | re.I)
+        plain = re.sub(r"<style.*?</style>", " ", plain, flags=re.S | re.I)
+        plain = re.sub(r"<[^>]+>", " ", plain)
+        plain = (
+            plain.replace("&amp;", "&").replace("&quot;", '"').replace("&#039;", "'")
+            .replace("&lt;", "<").replace("&gt;", ">").replace("&nbsp;", " ")
+        )
+        plain = re.sub(r"\s+", " ", plain).strip()
+        if arias:
+            plain = f"{plain} {arias}".strip()
+        if len(plain) < 25:
+            continue
+        link = re.search(
+            r'href=["\']([^"\']*(?:/posts/|/videos/|/reel/|story_fbid=|permalink\.php)[^"\']*)["\']',
+            chunk,
+            re.I,
+        )
+        url = link.group(1) if link else ""
+        if url.startswith("/"):
+            url = "https://www.facebook.com" + url
+        posts.append(
+            {
+                "url": url,
+                "text": plain[:1200],
+                "format": guess_format(plain),
+                "artist_name": "",
+                "posted_at": "",
+            }
+        )
+    return from_posts(posts, page_url)

@@ -432,3 +432,7 @@ a.song-chip:hover { background: var(--accent-soft); color: #ffd79a; }
   .rival-card { grid-template-columns: 64px 1fr; }
   .rival-actions { flex-direction: row; grid-column: 1 / -1; }
 }
+
+/* import từ link page đối thủ */
+.rival-steps { margin: 8px 0 12px; padding-left: 20px; display: flex; flex-direction: column; gap: 5px; font-size: 12.5px; color: var(--ink-2); }
+.rival-steps code { font-size: 12px; }

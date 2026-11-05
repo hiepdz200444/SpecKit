@@ -42,6 +42,7 @@
     zip: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M6 3h12v18H6z"/><path d="M12 3v6M12 12v2M12 17v2"/></svg>',
     link: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M10 13a5 5 0 0 0 7 0l2-2a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-2 2a5 5 0 0 0 7 7l1-1"/></svg>',
     check: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m5 13 4 4L19 7"/></svg>',
+    globe: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3c2.5 3 2.5 15 0 18M12 3c-2.5 3-2.5 15 0 18"/></svg>',
   };
 
   const state = {
@@ -54,8 +55,9 @@
     browserOnly: false,
     zipHint: false,
     saving: null,
-    rivalFilters: { q: "", platform: "", sort: "score", onlyUnused: false },
+    rivalFilters: { q: "", platform: "", sort: "score", page: "", onlyViral: false, onlyUnused: false },
     rivalReels: [],
+    rivalPages: [],
   };
 
   // ------------------------------------------------------------------ api
@@ -680,7 +682,12 @@
           <option value="engagement" ${f.sort === "engagement" ? "selected" : ""}>Tương tác cao nhất</option>
           <option value="recent" ${f.sort === "recent" ? "selected" : ""}>Mới nhập gần đây</option>
         </select>
-        <label class="chip ${f.onlyUnused ? "active" : ""}" id="runused" style="cursor:pointer">Chỉ reel chưa làm lại</label>
+        <select class="select" id="rpage-filter" style="max-width:230px">
+          <option value="">Mọi page đối thủ</option>
+          ${(state.rivalPages || []).map((p) => `<option value="${esc(p.page)}" ${f.page === p.page ? "selected" : ""}>${esc(p.page)} (${p.count})</option>`).join("")}
+        </select>
+        <label class="chip ${f.onlyViral ? "active" : ""}" id="rviral" style="cursor:pointer">Chỉ bài đã nổi</label>
+        <label class="chip ${f.onlyUnused ? "active" : ""}" id="runused" style="cursor:pointer">Chưa làm lại</label>
         <div class="spacer"></div>
         <button class="btn btn-sm btn-primary" id="btn-rimport">${ICON.plus} Nhập reel đối thủ</button>
       </div>
@@ -690,17 +697,33 @@
     const load = async () => {
       const list = $("#rlist");
       list.innerHTML = `<div class="skeleton" style="height:180px"></div>`;
-      const params = new URLSearchParams({ q: f.q, platform: f.platform, sort: f.sort, only_unused: String(f.onlyUnused) });
+      const params = new URLSearchParams({
+        q: f.q,
+        platform: f.platform,
+        sort: f.sort,
+        page: f.page || "",
+        only_viral: String(!!f.onlyViral),
+        only_unused: String(f.onlyUnused),
+      });
       try {
         const data = await api(`/api/rivals?${params}`);
         state.rivalReels = data.reels || [];
+        state.rivalPages = data.pages || [];
+        const pageSel = $("#rpage-filter");
+        if (pageSel) {
+          const current = f.page || "";
+          pageSel.innerHTML = `<option value="">Mọi page đối thủ</option>${state.rivalPages
+            .map((p) => `<option value="${esc(p.page)}" ${current === p.page ? "selected" : ""}>${esc(p.page)} (${p.count})</option>`)
+            .join("")}`;
+          pageSel.value = current;
+        }
         const navCount = $("#nav-rival-count");
         if (navCount) navCount.textContent = data.count ?? state.rivalReels.length;
         if (!state.rivalReels.length) {
           list.innerHTML = `
             <div class="empty">
               <h3>Chưa có reel nào</h3>
-              <p>Dán link reel đối thủ kèm số liệu bạn nhìn thấy (views / likes / comment / share). Studio không scrape Facebook, Instagram hay TikTok.</p>
+              <p>Dán link page Facebook đối thủ để studio lọc ra những bài đã nổi, hoặc dán tay số liệu từng reel. Studio không scrape mạng xã hội: trình duyệt của bạn đọc trang, studio chấm điểm và xếp hạng.</p>
               <button class="btn btn-primary" id="empty-import">${ICON.plus} Nhập reel đầu tiên</button>
             </div>`;
           const emptyBtn = $("#empty-import");
@@ -726,6 +749,21 @@
       clearTimeout(debounce);
       debounce = setTimeout(load, 260);
     });
+    const pageSelect = $("#rpage-filter");
+    if (pageSelect) {
+      pageSelect.addEventListener("change", (e) => {
+        f.page = e.target.value;
+        load();
+      });
+    }
+    const viralChip = $("#rviral");
+    if (viralChip) {
+      viralChip.onclick = () => {
+        f.onlyViral = !f.onlyViral;
+        viralChip.classList.toggle("active", f.onlyViral);
+        load();
+      };
+    }
     $("#rplatform").addEventListener("change", (e) => { f.platform = e.target.value; load(); });
     $("#rsort").addEventListener("change", (e) => { f.sort = e.target.value; load(); });
     $("#runused").addEventListener("click", () => {
@@ -757,6 +795,7 @@
             <span class="tag">${esc(reel.platform_label || reel.platform)}</span>
             <span class="tag">${esc(reel.format_label || reel.format)}</span>
             ${reel.remade_project_id ? `<span class="tag tag-ok">đã làm lại</span>` : ""}
+            ${reel.source_page ? `<span class="tag tag-accent">${esc(reel.source_page)}</span>` : ""}
             <span class="tiny muted">${esc(reel.artist_name || "chưa rõ nghệ sĩ")}</span>
           </div>
           <div class="rival-hook">“${esc(reel.hook || "(chưa có hook)")}”</div>
@@ -800,30 +839,139 @@
     });
   }
 
+  const PAGE_IMPORT_STEPS = [
+    `Mở page đối thủ trong một tab: <code>facebook.com/&lt;tên-page&gt;</code>`,
+    `Cuộn xuống 3–5 lần để Facebook tải thêm bài (mỗi lần ~3–5 bài).`,
+    `Bấm <b>F12</b> → tab <b>Console</b> → dán mã vừa copy → <b>Enter</b>.`,
+    `Studio tự nhận bài nếu cùng máy; nếu không, quay lại đây dán JSON vào ô dưới.`,
+  ];
+
   function openImportRivals(reload) {
     const panel = $("#rimport-panel");
     panel.innerHTML = `
       <div class="panel" style="margin-bottom:16px">
         <div class="panel-head">
           <h3>Nhập reel đối thủ</h3>
-          <span class="tiny muted">Studio không scrape mạng xã hội — bạn dán số liệu đang thấy</span>
+          <span class="tiny muted">Studio không scrape mạng xã hội — trình duyệt của bạn đọc, bạn quyết định</span>
           <div class="spacer"></div>
           <button class="btn btn-sm btn-ghost" id="rimport-close">Đóng</button>
         </div>
         <div class="panel-body">
-          <div class="banner-tip" style="margin-bottom:10px">
-            Mỗi dòng: <code>url | nền tảng | views | likes | comments | shares | nghệ sĩ | hook | format</code><br />
-            Chỉ cần <b>url</b> là đủ để bắt đầu; số liệu nhận <code>1.2M</code>, <code>84k</code>, <code>2.1 nghìn</code>.
-            Format: story · pov · list · quote · countdown · tribute.
+          <div class="tabs" style="margin-bottom:12px">
+            <button class="tab active" data-rmode="page">${ICON.globe} Từ link page Facebook</button>
+            <button class="tab" data-rmode="manual">${ICON.plus} Dán tay nhiều dòng</button>
           </div>
-          <textarea class="textarea" id="rimport-lines" style="min-height:130px" placeholder="https://www.tiktok.com/@user/video/123 | tiktok | 1.2M | 84k | 2.1k | 900 | Whitney Houston | The note nobody talks about | story"></textarea>
-          <div class="row" style="gap:8px;margin-top:10px">
-            <button class="btn btn-primary" id="rimport-save">${ICON.plus} Nhập vào danh sách</button>
-            <span class="tiny muted" id="rimport-hint"></span>
+
+          <div id="rmode-page">
+            <div class="field">
+              <label>Link page đối thủ</label>
+              <div class="row" style="gap:8px">
+                <input class="input" id="rpage-url" placeholder="https://www.facebook.com/ten-page" style="flex:1" />
+                <a class="btn btn-ghost" id="rpage-open" target="_blank" rel="noopener" hidden>Mở page</a>
+                <button class="btn btn-primary" id="rpage-copy">${ICON.copy} Copy mã lấy bài</button>
+              </div>
+            </div>
+            <div class="banner-tip" style="margin:10px 0 6px">
+              Facebook chặn máy chủ đọc page khi chưa đăng nhập, nên studio dùng <b>trình duyệt của bạn</b>
+              (đang đăng nhập sẵn) để đọc trang — không scrape, không cần token, không gửi gì cho bên thứ ba.
+            </div>
+            <ol class="rival-steps">
+              ${PAGE_IMPORT_STEPS.map((step) => `<li>${step}</li>`).join("")}
+            </ol>
+            <div class="field">
+              <label>JSON lấy được <span class="hint">dán vào đây nếu studio không tự nhận</span></label>
+              <textarea class="textarea" id="rpage-json" style="min-height:96px" placeholder='{"page_url":"https://www.facebook.com/…","posts":[{"url":"…","text":"…","likes":1200,"comments":84,"shares":12}]}'></textarea>
+            </div>
+            <div class="row" style="gap:10px;align-items:center;flex-wrap:wrap">
+              <button class="btn btn-primary" id="rpage-import">${ICON.spark} Lọc bài đã nổi &amp; nhập</button>
+              <label class="tiny muted" style="display:flex;gap:6px;align-items:center">
+                <input type="checkbox" id="rpage-only-viral" checked /> chỉ giữ bài đã nổi (điểm ≥ 65)
+              </label>
+              <span class="tiny muted" id="rpage-hint"></span>
+            </div>
+          </div>
+
+          <div id="rmode-manual" hidden>
+            <div class="banner-tip" style="margin-bottom:10px">
+              Mỗi dòng: <code>url | nền tảng | views | likes | comments | shares | nghệ sĩ | hook | format</code><br />
+              Chỉ cần <b>url</b> là đủ để bắt đầu; số liệu nhận <code>1.2M</code>, <code>84k</code>, <code>2.1 nghìn</code>.
+              Format: story · pov · list · quote · countdown · tribute.
+            </div>
+            <textarea class="textarea" id="rimport-lines" style="min-height:130px" placeholder="https://www.tiktok.com/@user/video/123 | tiktok | 1.2M | 84k | 2.1k | 900 | Whitney Houston | The note nobody talks about | story"></textarea>
+            <div class="row" style="gap:8px;margin-top:10px">
+              <button class="btn btn-primary" id="rimport-save">${ICON.plus} Nhập vào danh sách</button>
+              <span class="tiny muted" id="rimport-hint"></span>
+            </div>
           </div>
         </div>
       </div>`;
+
     $("#rimport-close").onclick = () => { panel.innerHTML = ""; };
+    $$("[data-rmode]").forEach((tab) => {
+      tab.onclick = () => {
+        $$("[data-rmode]").forEach((t) => t.classList.toggle("active", t === tab));
+        $("#rmode-page").hidden = tab.dataset.rmode !== "page";
+        $("#rmode-manual").hidden = tab.dataset.rmode !== "manual";
+      };
+    });
+
+    const pageInput = $("#rpage-url");
+    const openLink = $("#rpage-open");
+    const syncOpen = () => {
+      const url = (pageInput.value || "").trim();
+      openLink.hidden = !url;
+      if (url) openLink.href = /^https?:\/\//i.test(url) ? url : `https://${url}`;
+    };
+    pageInput.addEventListener("input", syncOpen);
+
+    $("#rpage-copy").onclick = async () => {
+      try {
+        const res = await fetch("/assets/fb-extract.js", { cache: "no-store" });
+        const code = await res.text();
+        await copyText(code, "Đã copy mã — dán vào Console của trang Facebook đối thủ");
+        $("#rpage-hint").textContent = "Đã copy mã ✓";
+        syncOpen();
+      } catch (err) {
+        toast(`Không copy được: ${err.message}`, "err");
+      }
+    };
+
+    $("#rpage-import").onclick = async () => {
+      const raw = ($("#rpage-json").value || "").trim();
+      if (!raw) {
+        return toast("Dán JSON lấy từ trang, hoặc bấm Copy mã lấy bài trước", "err");
+      }
+      let body;
+      try {
+        body = JSON.parse(raw);
+      } catch (err) {
+        return toast("JSON không hợp lệ — copy lại nguyên khối trong Console", "err");
+      }
+      body.page_url = body.page_url || (pageInput.value || "").trim();
+      body.only_viral = $("#rpage-only-viral").checked;
+      const btn = $("#rpage-import");
+      btn.disabled = true;
+      btn.innerHTML = "Đang lọc…";
+      try {
+        const res = await api("/api/rivals/from-page", { method: "POST", body });
+        const bits = [`Đã nhập ${res.added} bài đã nổi`];
+        if (res.skipped) bits.push(`bỏ ${res.skipped} bài trùng/không đọc được`);
+        if (res.filtered_out) bits.push(`loại ${res.filtered_out} bài chưa đủ nổi`);
+        toast(bits.join(" · "), res.added ? "ok" : "err");
+        $("#rpage-hint").textContent = bits.join(" · ");
+        if (res.added) {
+          $("#rpage-json").value = "";
+          panel.innerHTML = "";
+          await reload();
+        }
+      } catch (err) {
+        toast(err.message, "err");
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = `${ICON.spark} Lọc bài đã nổi &amp; nhập`;
+      }
+    };
+
     $("#rimport-save").onclick = async () => {
       const lines = ($("#rimport-lines").value || "").trim();
       if (!lines) return toast("Dán ít nhất một dòng", "err");

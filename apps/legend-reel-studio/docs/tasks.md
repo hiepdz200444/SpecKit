@@ -73,6 +73,8 @@
 - [x] T050 `POST /api/rivals/{id}/remake`: tạo dự án mới cùng pipeline (nghệ sĩ thư viện, tên mới, hoặc không chọn), gắn `project["remake"]`, brief vào `article.md` + `bundle.zip`, reel chuyển “đang làm lại”
 - [x] T051 UI “Reels đối thủ”: nhập hàng loạt, bảng xếp hạng có điểm + nhãn, bộ lọc/sắp xếp, brief mở tại chỗ, nút “Làm lại” mở hộp thoại chọn nghệ sĩ; banner “Làm lại từ reel đối thủ” ở đầu trang Studio
 - [x] T052 “Tạo bài viết bằng tên nhân vật”: `backend/profiles.py` + `custom_artists` + `GET/POST /api/artists/custom`, `PATCH/DELETE /api/artists/custom/{id}`, `POST /api/projects/custom`; panel ở Khám phá (tên + dịp + ngày, mở rộng để nhập chi tiết); link nhạc dạng tìm kiếm, giữ đúng đại từ, không in “0 years”
+- [x] T054 `POST /api/rivals/from-page` + `GET /api/rivals/pages` + cột `source_page`: chuẩn hoá `1,2 N` / `1.234` / `2,4 Tr`, bóc khối `role="article"` từ HTML lưu trang, bỏ trùng theo link/hook, chọn "đã nổi" (≥60 điểm, hoặc top 40% khi page nhỏ)
+- [x] T055 `web/assets/fb-extract.js`: script chạy trong Console của trang Facebook (đọc DOM, gửi thẳng về studio, dự phòng copy JSON); UI tab "Từ link page Facebook" (link page + copy mã + dán JSON + checkbox chỉ bài đã nổi), lọc theo page, chip "chỉ bài đã nổi"; README §5, `spec.md` FR-031…FR-033 + user story 7, `plan.md`, version 2.3.0 (91 pytest, 79 jsdom check UI + 12 check cho fb-extract)
 - [x] T053 CSS cho `rival-*`/`tier-*`/`remake-card` (desktop + mobile); bump `APP_VERSION` 2.2.0 + `features` (`rivals-ranking`, `rivals-remake`, `article-by-name`); cập nhật README mục 5–6, `docs/spec.md` FR-026…FR-030, jsdom smoke lên 69 check (77 pytest)
 
 ## Backlog (chưa làm)
