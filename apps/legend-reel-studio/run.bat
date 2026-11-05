@@ -30,7 +30,8 @@ if not exist ".venv" (
   )
 )
 
-".venv\Scripts\python.exe" -c "import fastapi, PIL, edge_tts, multipart, curl_cffi, httpx, h2" >nul 2>nul
+rem Goi bat buoc (thieu la khong chay duoc)
+".venv\Scripts\python.exe" -c "import fastapi, PIL, edge_tts, multipart" >nul 2>nul
 if errorlevel 1 (
   echo -^> Cai dependencies ^(lan dau co the mat 1-2 phut^)
   ".venv\Scripts\python.exe" -m pip install -q --upgrade pip
@@ -39,6 +40,18 @@ if errorlevel 1 (
     echo Cai dependencies that bai. Kiem tra ket noi mang roi chay lai.
     pause
     exit /b 1
+  )
+)
+
+rem Goi phu tro: giup Facebook khong tra HTTP 400 khi doc page doi thu.
+rem Thieu cung KHONG chan khoi dong - chi mat duong "dan link la xong".
+".venv\Scripts\python.exe" -c "import curl_cffi, httpx, h2" >nul 2>nul
+if errorlevel 1 (
+  echo -^> Cai them curl_cffi + httpx ^(de doc page Facebook tu may chu^)
+  ".venv\Scripts\python.exe" -m pip install -q curl_cffi "httpx[http2]"
+  if errorlevel 1 (
+    echo    ^! Khong cai duoc curl_cffi. Studio van chay; khi doc page hay dung
+    echo      "Tai trang HTML len" hoac nut bookmark trong tab Reels doi thu.
   )
 )
 

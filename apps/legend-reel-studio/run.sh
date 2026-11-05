@@ -35,12 +35,22 @@ fi
 # shellcheck disable=SC1091
 . .venv/bin/activate
 
-if ! python -c "import fastapi, PIL, edge_tts, multipart, curl_cffi, httpx, h2" >/dev/null 2>&1; then
+if ! python -c "import fastapi, PIL, edge_tts, multipart" >/dev/null 2>&1; then
   echo "→ Cài dependencies (lần đầu mất 1–2 phút)"
   pip install -q --upgrade pip
   if ! pip install -q -r requirements.txt; then
     echo "✗ pip install thất bại — kiểm tra mạng rồi chạy lại."
     exit 1
+  fi
+fi
+
+# Gói phụ trợ: giúp Facebook không trả HTTP 400 khi đọc page đối thủ.
+# Thiếu cũng không chặn khởi động — chỉ mất đường "dán link là xong".
+if ! python -c "import curl_cffi, httpx, h2" >/dev/null 2>&1; then
+  echo "→ Cài thêm curl_cffi + httpx (để đọc page Facebook từ máy chủ)"
+  if ! pip install -q curl_cffi "httpx[http2]"; then
+    echo "  ! Không cài được curl_cffi. Studio vẫn chạy; khi đọc page hãy dùng"
+    echo "    "Tải trang HTML lên" hoặc nút bookmark trong tab Reels đối thủ."
   fi
 fi
 

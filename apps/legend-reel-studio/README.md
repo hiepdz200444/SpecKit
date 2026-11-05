@@ -52,7 +52,7 @@ Nếu PowerShell chặn script: `powershell -ExecutionPolicy Bypass -File .\run.
 ### macOS / Linux
 
 ```bash
-git clone -b arena/19d0d9ca-speckit https://github.com/hiepdz200444/SpecKit.git
+git clone -b arena/6636da2c-speckit https://github.com/hiepdz200444/SpecKit.git
 cd SpecKit/apps/legend-reel-studio
 ./run.sh          # nếu báo Permission denied: chmod +x run.sh  rồi chạy lại
 ```
@@ -93,25 +93,53 @@ Muốn máy khác trong LAN vào được (điện thoại, máy tính bảng): 
 
 ```bash
 git fetch origin
-git status                       # xem đang ở nhánh nào, có sửa file gì không
-git checkout arena/19d0d9ca-speckit   # chỉ cần nếu đang ở nhánh khác (bản cũ)
-git pull origin arena/19d0d9ca-speckit
-git log --oneline -1             # commit mới nhất, ví dụ: eeb4d17 fix(voice): …
+git status                                  # đang ở nhánh nào, có sửa file gì không
+git checkout arena/6636da2c-speckit         # nhánh mới nhất (2.5.0)
+git pull origin arena/6636da2c-speckit
+git log --oneline -1                        # ví dụ: dab6d8c fix(rivals): …
 ```
 
-Rồi chạy lại `run.sh` / `run.bat`. Gặp vài tình huống thường gặp:
+Rồi **chạy lại studio** — script tự cài thêm gói mới (`curl_cffi`, `httpx[http2]`):
+
+```powershell
+# Windows — PowerShell hoặc cmd (đứng trong apps\legend-reel-studio)
+.\run.bat
+```
+
+```bash
+# macOS / Linux
+./run.sh
+```
+
+Nếu muốn cài tay trước khi chạy, nhớ dùng đúng đường dẫn của hệ điều hành:
+
+```powershell
+# Windows
+.venv\Scripts\python.exe -m pip install -r requirements.txt
+```
+
+```bash
+# macOS / Linux
+.venv/bin/pip install -r requirements.txt
+```
+
+> Trên Windows **không** có `./run.sh` và `.venv/bin/…` — đó là lệnh của macOS/Linux. Windows dùng `.venv\Scripts\…` và `run.bat` (hoặc `run.ps1`). PowerShell chặn script thì chạy `powershell -ExecutionPolicy Bypass -File .\run.ps1`.
+
+Các tình huống thường gặp:
 
 | Tình huống | Cách xử lý |
 | --- | --- |
-| `Your local changes would be overwritten` | `git stash` → `git pull origin arena/19d0d9ca-speckit` → `git stash pop` |
-| Muốn bỏ hết sửa đổi code ở máy, lấy đúng bản trên GitHub | `git reset --hard origin/arena/19d0d9ca-speckit` (không đụng tới `data/`) |
+| `Your local changes would be overwritten` | `git stash` → `git pull origin arena/6636da2c-speckit` → `git stash pop` |
+| Muốn bỏ hết sửa đổi code ở máy, lấy đúng bản trên GitHub | `git reset --hard origin/arena/6636da2c-speckit` (không đụng tới `data/`) |
 | `fatal: not a git repository` | Bạn đang dùng bản tải ZIP → làm theo cách dưới |
-| `git pull` báo có thay đổi `requirements.txt` | Xoá thư mục `.venv` rồi chạy lại `run.sh`/`run.bat` để cài lại thư viện |
-| Đang ở nhánh mặc định (bản cũ, có render video) | `git checkout arena/19d0d9ca-speckit` — bản mới nằm ở nhánh này cho tới khi PR #7 được merge |
+| `'.venv/bin/pip' is not recognized` (Windows) | Bạn vừa dán lệnh Linux. Dùng `.venv\Scripts\python.exe -m pip install -r requirements.txt` |
+| `'./run.sh' is not recognized` (Windows) | Dùng `.\run.bat` (hoặc `powershell -ExecutionPolicy Bypass -File .\run.ps1`) |
+| Thiếu `curl_cffi` / pip cài lỗi | Studio vẫn chạy. Đọc page bằng **"Tải trang HTML lên"** hoặc **nút bookmark** trong tab Reels đối thủ |
+| `git pull` báo có thay đổi `requirements.txt` | Không cần xoá `.venv` — chạy `run.bat`/`run.sh`, script tự cài gói còn thiếu |
 
-**Không dùng Git (tải ZIP)**: vào GitHub → chọn branch **`arena/19d0d9ca-speckit`** → **Code → Download ZIP** → giải nén ra thư mục mới, sau đó **copy thư mục `data/` của bản cũ sang** (dự án, ảnh, voice nằm ở đó), rồi chạy `run.bat`/`run.sh` trong thư mục mới. Chỉ muốn cập nhật tại chỗ thì chép đè các thư mục `backend/`, `web/`, `docs/`, `tests/` + các file `requirements.txt`, `run.sh`, `run.ps1`, `run.bat`, `README.md`.
+**Không dùng Git (tải ZIP)**: vào GitHub → chọn branch **`arena/6636da2c-speckit`** → **Code → Download ZIP** → giải nén ra thư mục mới, sau đó **copy thư mục `data/` của bản cũ sang** (dự án, ảnh, voice nằm ở đó), rồi chạy `run.bat`/`run.sh` trong thư mục mới. Chỉ muốn cập nhật tại chỗ thì chép đè các thư mục `backend/`, `web/`, `docs/`, `tests/` + các file `requirements.txt`, `run.sh`, `run.ps1`, `run.bat`, `README.md`.
 
-**Kiểm tra đang chạy bản nào**: nhìn góc dưới thanh bên (**`Legends Studio v2.1.0 · eeb4d17`**) hoặc mở [`/api/version`](http://localhost:8000/api/version) — trả về `version`, `commit` (commit của bản clone) và danh sách `features` của bản đang chạy.
+**Kiểm tra đang chạy bản nào**: nhìn góc dưới thanh bên (**`Legends Studio v2.5.0 · dab6d8c`**) hoặc mở [`/api/version`](http://localhost:8000/api/version) — trả về `version`, `commit` (commit của bản clone) và danh sách `features` của bản đang chạy.
 
 ### Cần Internet ở đâu?
 

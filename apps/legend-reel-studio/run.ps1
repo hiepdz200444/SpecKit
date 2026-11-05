@@ -33,12 +33,23 @@ if (-not (Test-Path ".venv")) {
 $py = Join-Path $PSScriptRoot ".venv\Scripts\python.exe"
 if (-not (Test-Path $py)) { Fail "Khong tim thay $py. Xoa thu muc .venv roi chay lai." }
 
-& $py -c "import fastapi, PIL, edge_tts, multipart, curl_cffi, httpx, h2" 2>&1 | Out-Null
+& $py -c "import fastapi, PIL, edge_tts, multipart" 2>&1 | Out-Null
 if ($LASTEXITCODE -ne 0) {
     Write-Host "-> Cai dependencies (lan dau co the mat 1-2 phut)" -ForegroundColor Cyan
     & $py -m pip install -q --upgrade pip
     & $py -m pip install -q -r requirements.txt
     if ($LASTEXITCODE -ne 0) { Fail "Cai dependencies that bai. Kiem tra ket noi mang roi chay lai." }
+}
+
+# Goi phu tro: giup Facebook khong tra HTTP 400 khi doc page doi thu.
+# Thieu cung khong chan khoi dong - chi mat duong "dan link la xong".
+& $py -c "import curl_cffi, httpx, h2" 2>&1 | Out-Null
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "-> Cai them curl_cffi + httpx (de doc page Facebook tu may chu)" -ForegroundColor Cyan
+    & $py -m pip install -q curl_cffi "httpx[http2]"
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "   ! Khong cai duoc curl_cffi. Studio van chay; khi doc page hay dung 'Tai trang HTML len' hoac nut bookmark." -ForegroundColor Yellow
+    }
 }
 
 New-Item -ItemType Directory -Force -Path "data" | Out-Null
