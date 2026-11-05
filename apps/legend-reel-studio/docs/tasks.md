@@ -66,6 +66,8 @@
 - [x] T045 `pytest` 58 test, jsdom 50 check
 - [x] T046 Sửa lỗi “đổi voice vẫn nghe bản cũ”: tên file voice mới mỗi lần tạo, `Cache-Control: no-store` cho `/media/voice/`, cảnh báo khi phải dùng pyttsx3 thay edge-tts, nhắc bấm “Tạo voice” khi đổi dropdown (61 pytest, 52 jsdom check)
 
+- [x] T047 `/api/version` + nhãn phiên bản ở sidebar; README mục 2.1 hướng dẫn lấy commit mới cho bản clone cũ / bản ZIP (62 pytest, 53 jsdom check)
+
 ## Backlog (chưa làm)
 
 - [ ] T034 Đăng trực tiếp qua Facebook Graph API (cần quyền Page)

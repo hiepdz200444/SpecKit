@@ -30,6 +30,14 @@ def _create(day: str) -> dict:
     return res.json()
 
 
+def test_version_endpoint_tells_which_copy_is_running():
+    data = client.get("/api/version").json()
+    assert data["app"] == "legend-reel-studio"
+    assert data["version"].startswith("2.")
+    assert isinstance(data["commit"], str)
+    assert "bundle-download" in data["features"]
+
+
 def test_bootstrap_shape(day):
     data = client.get(f"/api/bootstrap?day={day}").json()
     assert data["today"] == day
@@ -37,6 +45,7 @@ def test_bootstrap_shape(day):
     assert data["limits"]["article"] == [700, 900]
     assert data["limits"]["overlay"] == [9, 15]
     assert data["limits"]["images"] == 20
+    assert data["version"]["version"].startswith("2.")
     assert data["voices"] and all(v["id"].startswith("en-US-") for v in data["voices"])
     assert "total" in data["stats"]
     assert "styles" not in data  # video rendering was removed

@@ -182,6 +182,10 @@ async function main() {
 
     await waitFor(() => $("#view .hero") && $("[data-nav]"), "dashboard to render");
 
+    console.log("• Phiên bản đang chạy");
+    await waitFor(() => /Legends Studio v\d/.test($("#side-version").textContent), "version label", 15000);
+    ok(/Legends Studio v2\./.test($("#side-version").textContent), `sidebar hiện phiên bản (${$("#side-version").textContent.trim()})`);
+
     console.log("• Sidebar navigation");
     ok($$("[data-nav]").length === 4, "4 sidebar items found");
 

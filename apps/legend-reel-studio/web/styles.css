@@ -79,6 +79,8 @@ button { cursor: pointer; }
 .nav-item.active svg { opacity: 1; }
 .nav-badge { margin-left: auto; font-size: 11px; padding: 1px 7px; border-radius: 20px; background: rgba(255, 255, 255, 0.08); color: var(--muted); }
 
+.side-version { margin-top: 10px; padding: 0 4px 2px; font-size: 11px; line-height: 1.5; color: var(--ink-3); letter-spacing: 0.03em; }
+
 .side-card {
   margin-top: auto; border: 1px solid var(--line); border-radius: 16px; padding: 14px;
   background: linear-gradient(165deg, rgba(240, 176, 76, 0.1), rgba(20, 22, 32, 0.6));
@@ -395,7 +397,7 @@ a.song-chip:hover { background: var(--accent-soft); color: #ffd79a; }
   .app { grid-template-columns: 1fr; }
   .sidebar { position: static; height: auto; flex-direction: row; align-items: center; overflow-x: auto; padding: 12px 14px; gap: 10px; }
   .sidebar .nav { flex-direction: row; }
-  .nav-label, .side-card { display: none; }
+  .nav-label, .side-card, .side-version { display: none; }
   .brand { padding: 0 8px 0 0; }
   .topbar { padding: 12px 16px; }
   .view { padding: 18px 16px 60px; }

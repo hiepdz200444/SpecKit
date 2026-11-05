@@ -139,6 +139,7 @@ Người dùng xem toàn bộ dự án, lọc theo trạng thái, tìm kiếm, m
 - **FR-018**: Giao diện PHẢI là tiếng Việt, nội dung xuất bản là tiếng Anh (thị trường Mỹ).
 - **FR-023**: Đổi giọng đọc PHẢI tạo file voice mới (tên khác) và trả URL mới, phục vụ với `Cache-Control: no-store`, để trình duyệt không phát lại bản ghi cũ.
 - **FR-024**: Khi engine dự phòng (pyttsx3) được dùng thay edge-tts, UI PHẢI cảnh báo rằng giọng en-US đã chọn chưa được áp dụng.
+- **FR-025**: Studio PHẢI cho biết phiên bản đang chạy: `GET /api/version` trả `version`, `commit` và `features`; sidebar hiện `Legends Studio vX · commit`.
 - **FR-019**: Nút “Tự động lấy 20 ảnh” PHẢI lấy và lưu ảnh trong một lần bấm (`POST /images/auto`); khi máy chủ không có Internet, studio PHẢI tự chuyển sang tải ảnh bằng trình duyệt và upload qua `data_url`, kèm tiến trình “Đang tải i/n”.
 - **FR-021**: Studio PHẢI có nút “Tải về máy” xuất một `.zip` gồm `article.md`, `project.json`, ảnh JPEG + `ATTRIBUTION.txt`, voice và `HUONG-DAN.txt`.
 - **FR-022**: UI PHẢI có công cụ “Kiểm tra mạng” gọi thử Wikipedia/Commons từ trình duyệt và gửi kết quả về `POST /api/client-log` để chẩn đoán khi máy chủ bị chặn mạng.

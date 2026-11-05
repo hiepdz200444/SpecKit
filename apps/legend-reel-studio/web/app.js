@@ -256,11 +256,21 @@
   }
 
   // ------------------------------------------------------------------ bootstrap
+  function showVersion(info) {
+    const el = $("#side-version");
+    if (!el) return;
+    if (!info) { el.textContent = "không rõ phiên bản"; return; }
+    const commit = info.commit ? ` · ${info.commit}` : "";
+    el.textContent = `Legends Studio v${info.version}${commit}`;
+    el.title = `Phiên bản ${info.version}${commit ? ` (commit ${info.commit})` : ""}\nKiểm tra bằng: /api/version`;
+  }
+
   async function boot() {
     try {
       state.boot = await api(`/api/bootstrap?day=${state.filters.date}`);
       state.boot.artists = state.boot.artists || [];
       $("#today-label").textContent = fmtLong(state.boot.today);
+      showVersion(state.boot.version);
     } catch (err) {
       toast(`Không kết nối được API: ${err.message}`, "err");
     }

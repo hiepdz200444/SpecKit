@@ -81,8 +81,34 @@ Muốn máy khác trong LAN vào được (điện thoại, máy tính bảng): 
 
 - Toàn bộ dự án, ảnh, voice nằm trong `apps/legend-reel-studio/data/` (`studio.db`, `images/`, `voice/`). **Sao lưu = copy thư mục `data/`**. Thư mục này không bị commit.
 - Nút **“Tải về máy”** trong studio xuất một file `.zip` (bài báo + JSON + ảnh + `ATTRIBUTION.txt` + voice) để mang sang máy khác.
-- Cập nhật code: `git pull` (hoặc tải ZIP mới đè lên) rồi chạy lại `run.sh`/`run.bat`. Giữ nguyên `.venv` và `data/`; nếu `requirements.txt` đổi thì xoá `.venv` để cài lại.
+- Cập nhật code: xem mục **2.1** bên dưới rồi chạy lại `run.sh`/`run.bat`. Giữ nguyên `.venv` và `data/`; nếu `requirements.txt` đổi thì xoá `.venv` để cài lại.
 - Tắt server: `Ctrl + C`. Lần sau chỉ cần chạy lại `run.sh`/`run.bat` (vài giây, không cài lại gì).
+
+### 2.1. Lấy commit mới khi đã có bản cũ trên máy
+
+**Có Git** — chạy trong thư mục `SpecKit`:
+
+```bash
+git fetch origin
+git status                       # xem đang ở nhánh nào, có sửa file gì không
+git checkout arena/19d0d9ca-speckit   # chỉ cần nếu đang ở nhánh khác (bản cũ)
+git pull origin arena/19d0d9ca-speckit
+git log --oneline -1             # commit mới nhất, ví dụ: eeb4d17 fix(voice): …
+```
+
+Rồi chạy lại `run.sh` / `run.bat`. Gặp vài tình huống thường gặp:
+
+| Tình huống | Cách xử lý |
+| --- | --- |
+| `Your local changes would be overwritten` | `git stash` → `git pull origin arena/19d0d9ca-speckit` → `git stash pop` |
+| Muốn bỏ hết sửa đổi code ở máy, lấy đúng bản trên GitHub | `git reset --hard origin/arena/19d0d9ca-speckit` (không đụng tới `data/`) |
+| `fatal: not a git repository` | Bạn đang dùng bản tải ZIP → làm theo cách dưới |
+| `git pull` báo có thay đổi `requirements.txt` | Xoá thư mục `.venv` rồi chạy lại `run.sh`/`run.bat` để cài lại thư viện |
+| Đang ở nhánh mặc định (bản cũ, có render video) | `git checkout arena/19d0d9ca-speckit` — bản mới nằm ở nhánh này cho tới khi PR #7 được merge |
+
+**Không dùng Git (tải ZIP)**: vào GitHub → chọn branch **`arena/19d0d9ca-speckit`** → **Code → Download ZIP** → giải nén ra thư mục mới, sau đó **copy thư mục `data/` của bản cũ sang** (dự án, ảnh, voice nằm ở đó), rồi chạy `run.bat`/`run.sh` trong thư mục mới. Chỉ muốn cập nhật tại chỗ thì chép đè các thư mục `backend/`, `web/`, `docs/`, `tests/` + các file `requirements.txt`, `run.sh`, `run.ps1`, `run.bat`, `README.md`.
+
+**Kiểm tra đang chạy bản nào**: nhìn góc dưới thanh bên (**`Legends Studio v2.1.0 · eeb4d17`**) hoặc mở [`/api/version`](http://localhost:8000/api/version) — trả về `version`, `commit` (commit của bản clone) và danh sách `features` của bản đang chạy.
 
 ### Cần Internet ở đâu?
 

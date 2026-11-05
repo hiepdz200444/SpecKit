@@ -7,6 +7,7 @@ import json
 import os
 import re
 import shutil
+import subprocess
 import time
 import zipfile
 from datetime import date, datetime, timezone
@@ -33,6 +34,47 @@ IMAGE_ID_RE = re.compile(r"^[a-f0-9]{8,32}$")
 
 for d in (DATA_DIR, IMAGE_DIR, VOICE_DIR):
     os.makedirs(d, exist_ok=True)
+
+APP_VERSION = "2.1.0"
+_COMMIT_CACHE: dict[str, str] = {}
+
+
+def app_commit() -> str:
+    """Short git commit of the running copy (empty when it was not a clone)."""
+    if "commit" in _COMMIT_CACHE:
+        return _COMMIT_CACHE["commit"]
+    commit = ""
+    if shutil.which("git"):
+        try:
+            out = subprocess.run(
+                ["git", "-C", os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "rev-parse", "--short", "HEAD"],
+                capture_output=True,
+                text=True,
+                timeout=3,
+            )
+            if out.returncode == 0:
+                commit = out.stdout.strip()
+        except (OSError, subprocess.SubprocessError):
+            commit = ""
+    _COMMIT_CACHE["commit"] = commit
+    return commit
+
+
+def version_info() -> dict:
+    return {
+        "app": "legend-reel-studio",
+        "version": APP_VERSION,
+        "commit": app_commit(),
+        "features": [
+            "article-700-900",
+            "artist-images-auto",
+            "browser-image-fallback",
+            "bundle-download",
+            "voice-new-take-per-render",
+            "no-video-render",
+        ],
+    }
+
 
 STATUS_LABELS = {
     "draft": "Nháp",
@@ -144,6 +186,7 @@ def bootstrap(day: str = Query(default="")):
         },
         "voices": voice_mod.NEURAL_VOICES,
         "tts_engines": voice_mod.engines(),
+        "version": version_info(),
     }
 
 
@@ -563,6 +606,11 @@ def download_images_zip(pid: str):
 # --------------------------------------------------------------------------- #
 # voice                                                                       #
 # --------------------------------------------------------------------------- #
+@app.get("/api/version")
+def version():
+    return version_info()
+
+
 @app.get("/api/voices")
 def voices():
     return {"voices": voice_mod.NEURAL_VOICES, "engines": voice_mod.engines(), "default": voice_mod.DEFAULT_VOICE}
