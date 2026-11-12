@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Legends Reel Studio — Reels nhạc cho thị trường Mỹ</title>
-<meta name="description" content="Tìm sự kiện của các huyền thoại âm nhạc, viết bài báo, render reel MP4 và tạo caption kéo người xem xuống comment." />
+<title>Legends Reel Studio — Bài báo, ảnh & voice cho reels nhạc Mỹ</title>
+<meta name="description" content="Tìm sự kiện của các huyền thoại âm nhạc, viết bài báo 700–900 từ, gom ảnh nghệ sĩ có giấy phép, tạo chữ trên video 9–15 từ, hook, caption, comment pin và voiceover tiếng Anh." />
 <link rel="stylesheet" href="/styles.css" />
 <link rel="preload" href="/assets/fonts/Anton-Regular.ttf" as="font" type="font/ttf" crossorigin />
 <style>
@@ -48,6 +48,11 @@
         Dự án reels
         <span class="nav-badge" id="nav-project-count">0</span>
       </button>
+      <button class="nav-item" data-nav="rivals">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 20V10"/><path d="M10 20V4"/><path d="M16 20v-7"/><path d="M22 20H2"/></svg>
+        Reels đối thủ
+        <span class="nav-badge" id="nav-rival-count">0</span>
+      </button>
       <div class="nav-label">Quy trình</div>
       <button class="nav-item" data-nav="howto">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 3v18"/><path d="M3 8h18"/><path d="M5 16h14"/></svg>
@@ -60,6 +65,8 @@
       <div class="side-date" id="side-date">—</div>
       <p id="side-events">Đang tải lịch sử âm nhạc…</p>
     </div>
+
+    <div class="side-version" id="side-version" title="Phiên bản đang chạy">đang kiểm tra phiên bản…</div>
   </aside>
 
   <div class="main">
@@ -72,7 +79,7 @@
         </span>
         <button class="btn btn-primary" id="btn-new">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
-          Tạo reels mới
+          Tạo dự án mới
         </button>
       </div>
     </header>

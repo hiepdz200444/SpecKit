@@ -1,0 +1,12 @@
+{
+  "name": "legend-reel-studio-ui-tests",
+  "private": true,
+  "type": "module",
+  "description": "jsdom smoke test for the Legends Reel Studio SPA",
+  "scripts": {
+    "test:ui": "node tests/ui_smoke.mjs"
+  },
+  "devDependencies": {
+    "jsdom": "^25.0.1"
+  }
+}

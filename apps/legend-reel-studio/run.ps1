@@ -11,21 +11,29 @@ function Fail($message) {
     exit 1
 }
 
-$python = Get-Command python -ErrorAction SilentlyContinue
-if (-not $python) {
+$pythonArgs = @()
+if (Get-Command python -ErrorAction SilentlyContinue) {
+    $pythonExe = "python"
+} elseif (Get-Command py -ErrorAction SilentlyContinue) {
+    $pythonExe = "py"
+    $pythonArgs = @("-3")
+} else {
     Fail "Chua co Python. Cai bang:  winget install --id Python.Python.3.12 -e --source winget   (roi mo lai PowerShell)"
 }
 
+& $pythonExe @pythonArgs -c "import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)"
+if ($LASTEXITCODE -ne 0) { Fail "Can Python 3.11 tro len. Tai ban moi tai python.org (nho tick 'Add python.exe to PATH')." }
+
 if (-not (Test-Path ".venv")) {
     Write-Host "-> Tao virtualenv .venv" -ForegroundColor Cyan
-    & python -m venv .venv
+    & $pythonExe @pythonArgs -m venv .venv
     if ($LASTEXITCODE -ne 0) { Fail "Tao .venv that bai. Thu cai Python 3.11+ tu python.org." }
 }
 
 $py = Join-Path $PSScriptRoot ".venv\Scripts\python.exe"
 if (-not (Test-Path $py)) { Fail "Khong tim thay $py. Xoa thu muc .venv roi chay lai." }
 
-& $py -c "import fastapi, PIL, imageio_ffmpeg, numpy" 2>&1 | Out-Null
+& $py -c "import fastapi, PIL, edge_tts, multipart" 2>&1 | Out-Null
 if ($LASTEXITCODE -ne 0) {
     Write-Host "-> Cai dependencies (lan dau co the mat 1-2 phut)" -ForegroundColor Cyan
     & $py -m pip install -q --upgrade pip

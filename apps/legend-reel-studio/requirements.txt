@@ -2,9 +2,12 @@
 fastapi>=0.115
 uvicorn[standard]>=0.30
 pillow>=10.4
-numpy>=1.26
-imageio-ffmpeg>=0.5
 python-multipart>=0.0.9
+
+# voiceover: edge-tts = neural en-US voices (needs internet),
+# pyttsx3 = offline fallback using the system voice
+edge-tts>=6.1
+pyttsx3>=2.90
 
 # dev / tests
 pytest>=8.2
